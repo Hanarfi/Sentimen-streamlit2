@@ -216,6 +216,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+.metric-card{
+  background:#FFFFFF;
+  border:1px solid #E6F0FF;
+  border-radius:16px;
+  padding:14px 16px;
+  box-shadow:0 8px 20px rgba(15, 23, 42, 0.06);
+}
+.metric-title{font-weight:900; color:#0F172A; margin:0; font-size:14px;}
+.metric-value{font-weight:900; font-size:26px; margin:4px 0 0 0;}
+.metric-sub{color:#475569; margin-top:6px; font-size:13px;}
+</style>
+""", unsafe_allow_html=True)
 
 
 def card_open():
@@ -816,10 +830,10 @@ elif st.session_state.menu == "Preprocessing":
 
 
 # =========================
-# MENU: KLASIFIKASI SVM
+# MENU: KLASIFIKASI SVM (versi awam-friendly)
 # =========================
 elif st.session_state.menu == "Klasifikasi SVM":
-    bright_header("🧠 Klasifikasi SVM", "Klik tombol untuk melihat confusion matrix, report, dan akurasi.")
+    bright_header("🧠 Klasifikasi SVM", "Hasil dibuat lebih mudah dipahami untuk orang awam.")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
@@ -830,63 +844,197 @@ elif st.session_state.menu == "Klasifikasi SVM":
         st.error("Kolom wajib tidak ada: butuh 'content' dan 'Sentimen'")
         st.stop()
 
+    # Pastikan hanya 2 kelas
+    df = df[df["Sentimen"].isin(["positif", "negatif"])].copy()
+    df["content"] = df["content"].astype(str).fillna("")
+
     card_open()
     st.markdown("#### Jalankan SVM (TF-IDF, split 80/20)")
     run_svm = st.button("🚀 Mulai Klasifikasi SVM", use_container_width=True)
     card_close()
 
-    if run_svm:
-        X = df["content"].astype(str).fillna("")
-        y = df["Sentimen"].astype(str)
+    if not run_svm:
+        st.info("Klik tombol di atas untuk melihat hasil model.")
+        st.stop()
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42,
-            stratify=y if len(y.unique()) > 1 else None
+    # ======================
+    # TRAIN + PREDICT
+    # ======================
+    X = df["content"]
+    y = df["Sentimen"].astype(str)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42,
+        stratify=y
+    )
+
+    tfidf = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
+    X_train_vec = tfidf.fit_transform(X_train)
+    X_test_vec = tfidf.transform(X_test)
+
+    model = LinearSVC()
+    model.fit(X_train_vec, y_train)
+    y_pred = model.predict(X_test_vec)
+
+    acc = accuracy_score(y_test, y_pred)
+
+    labels = ["negatif", "positif"]  # urutan tetap agar CM konsisten
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+
+    # ======================
+    # NARASI AWAM
+    # ======================
+    total = cm.sum()
+    benar = int(cm[0, 0] + cm[1, 1])
+    salah = int(cm[0, 1] + cm[1, 0])
+
+    salah_neg_jadi_pos = int(cm[0, 1])
+    salah_pos_jadi_neg = int(cm[1, 0])
+
+    # kalimat kesimpulan
+    kesimpulan = f"Model benar menebak **{benar} dari {total}** ulasan (≈ **{acc*100:.1f}%**)."
+    if salah_neg_jadi_pos > salah_pos_jadi_neg:
+        kesimpulan2 = f"Kesalahan yang paling sering: **ulasan negatif dikira positif** ({salah_neg_jadi_pos} kasus)."
+    elif salah_pos_jadi_neg > salah_neg_jadi_pos:
+        kesimpulan2 = f"Kesalahan yang paling sering: **ulasan positif dikira negatif** ({salah_pos_jadi_neg} kasus)."
+    else:
+        kesimpulan2 = f"Kesalahan negatif→positif dan positif→negatif jumlahnya mirip."
+
+    # ======================
+    # TAMPILKAN RINGKASAN
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### ✅ Ringkasan Hasil")
+    st.markdown(kesimpulan)
+    st.markdown(kesimpulan2)
+    st.markdown(
+        "- **Benar** artinya prediksi sama dengan label asli.\n"
+        "- **Salah** artinya prediksi berbeda dari label asli."
+    )
+    card_close()
+
+    # ======================
+    # CONFUSION MATRIX versi awam: 4 kartu
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🔎 Confusion Matrix (versi mudah)")
+
+    a, b, c, d = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+    # a: negatif->negatif, b: negatif->positif, c: positif->negatif, d: positif->positif
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(
+            f"""
+<div class="metric-card">
+  <p class="metric-title">✅ Negatif terdeteksi benar</p>
+  <p class="metric-value">{a}</p>
+  <p class="metric-sub">Ulasan negatif, diprediksi negatif (benar)</p>
+</div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            f"""
+<div class="metric-card" style="margin-top:12px;">
+  <p class="metric-title">❌ Negatif salah jadi positif</p>
+  <p class="metric-value">{b}</p>
+  <p class="metric-sub">Ulasan negatif, diprediksi positif (salah)</p>
+</div>
+            """,
+            unsafe_allow_html=True
         )
 
-        tfidf = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
-        X_train_vec = tfidf.fit_transform(X_train)
-        X_test_vec = tfidf.transform(X_test)
+    with c2:
+        st.markdown(
+            f"""
+<div class="metric-card">
+  <p class="metric-title">❌ Positif salah jadi negatif</p>
+  <p class="metric-value">{c}</p>
+  <p class="metric-sub">Ulasan positif, diprediksi negatif (salah)</p>
+</div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            f"""
+<div class="metric-card" style="margin-top:12px;">
+  <p class="metric-title">✅ Positif terdeteksi benar</p>
+  <p class="metric-value">{d}</p>
+  <p class="metric-sub">Ulasan positif, diprediksi positif (benar)</p>
+</div>
+            """,
+            unsafe_allow_html=True
+        )
 
-        model = LinearSVC()
-        model.fit(X_train_vec, y_train)
-        y_pred = model.predict(X_test_vec)
+    st.markdown("---")
+    st.caption("Catatan: 4 kartu di atas adalah bentuk yang sama dengan confusion matrix, hanya dibuat lebih mudah dibaca.")
+    card_close()
 
-        acc = accuracy_score(y_test, y_pred)
-        labels = sorted(y.unique())
-        cm = confusion_matrix(y_test, y_pred, labels=labels)
+    # ======================
+    # PENJELASAN METRIK (awam-friendly)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 📘 Apa arti Precision / Recall / F1?")
 
-        st.markdown("")
-        card_open()
-        st.markdown(f"### ✅ Akurasi: `{acc:.4f}`")
-        card_close()
+    with st.expander("Klik untuk lihat penjelasan sederhana"):
+        st.markdown(
+            """
+- **Precision (ketepatan)**: Kalau model bilang “positif”, seberapa sering itu benar?
+- **Recall (kelengkapan)**: Dari semua yang benar-benar “positif”, seberapa banyak yang berhasil ditangkap model?
+- **F1-Score**: Nilai ringkasan yang menyeimbangkan precision dan recall.
+- **Support**: Jumlah data (ulasan) pada kelas tersebut.
+            """.strip()
+        )
 
-        st.markdown("")
-        card_open()
-        st.markdown("### Confusion Matrix")
-        fig = plt.figure()
-        plt.imshow(cm, interpolation="nearest")
-        plt.title("Confusion Matrix")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-        plt.xticks(range(len(labels)), labels, rotation=30, ha="right")
-        plt.yticks(range(len(labels)), labels)
+    rep = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+    rep_df = pd.DataFrame(rep).transpose()
+    st.dataframe(rep_df, use_container_width=True)
+    card_close()
 
-        thresh = cm.max() / 2 if cm.max() > 0 else 0
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-                plt.text(
-                    j, i, str(cm[i, j]),
-                    ha="center", va="center",
-                    color="white" if cm[i, j] > thresh else "black"
-                )
-        plt.tight_layout()
-        st.pyplot(fig)
-        card_close()
+    # ======================
+    # CONTOH SALAH PREDIKSI (paling penting untuk awam)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
 
-        st.markdown("")
-        card_open()
-        st.markdown("### Classification Report")
-        rep = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-        st.dataframe(pd.DataFrame(rep).transpose(), use_container_width=True)
-        card_close()
+    # Buat dataframe evaluasi
+    eval_df = pd.DataFrame({
+        "Ulasan": X_test.values,
+        "Label Asli": y_test.values,
+        "Prediksi Model": y_pred
+    })
+
+    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
+    if wrong_df.empty:
+        st.success("Tidak ada salah prediksi pada data uji (jarang terjadi, tapi bisa).")
+    else:
+        st.caption("Berikut beberapa contoh yang membuat model keliru (ini membantu orang awam memahami batasan model).")
+        st.dataframe(wrong_df.head(15), use_container_width=True)
+    card_close()
+
+    # ======================
+    # CONTOH PALING “YAKIN” (pakai decision_function)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### ⭐ Contoh Prediksi Paling Yakin (agar terasa nyata)")
+
+    try:
+        scores = model.decision_function(X_test_vec)
+        # Binary: score > 0 biasanya ke kelas "positif" tergantung urutan training
+        # Kita tetap pakai skor absolut untuk confidence
+        eval_df["Skor Keyakinan"] = np.abs(scores)
+
+        top_conf = eval_df.sort_values("Skor Keyakinan", ascending=False).head(10)
+        st.caption("Semakin besar skor keyakinan, semakin yakin model dengan prediksinya.")
+        st.dataframe(top_conf, use_container_width=True)
+    except Exception:
+        st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
+
+    card_close()
+
