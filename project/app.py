@@ -56,6 +56,7 @@ CSS = """
   font-weight: 800 !important;
 }
 
+
 /* ===== Sidebar nav modern ===== */
 .nav-wrap {
   background: #FFFFFF;
@@ -105,7 +106,6 @@ CSS = """
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
-True)
 
 
 
