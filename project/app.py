@@ -5,17 +5,13 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-# ===== Scraping =====
 from google_play_scraper import reviews, Sort
 
-# ===== NLP =====
 import emoji
 import nltk
 from nltk.corpus import stopwords
-
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 
-# ===== ML =====
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
@@ -25,29 +21,43 @@ import matplotlib.pyplot as plt
 
 
 # =========================
-# Streamlit Config + Light UI
+# Page config
 # =========================
 st.set_page_config(page_title="Sentimen Analyzer", page_icon="💬", layout="wide")
 
-BRIGHT_CSS = """
+
+# =========================
+# CSS (kontras aman + rapi)
+# =========================
+CSS = """
 <style>
-.stApp {background: linear-gradient(180deg,#F7FBFF 0%,#FFFFFF 60%,#F7FFFB 100%);}
-.block-container {padding-top: 2rem; padding-bottom: 2rem;}
+.block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
+
 .bright-card{
-  background:white; border-radius:18px; padding:18px;
-  border:1px solid #E9F2FF; box-shadow:0 8px 22px rgba(25,118,210,0.08);
+  background:#FFFFFF; border-radius:16px; padding:18px;
+  border:1px solid #E6F0FF; box-shadow:0 8px 20px rgba(15, 23, 42, 0.06);
 }
+
 .title-grad{
-  font-size:34px; font-weight:800;
+  font-size:34px; font-weight:900; margin:0; line-height:1.1;
   background:linear-gradient(90deg,#1565C0,#00BFA5);
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-  margin:0; line-height:1.1;
 }
-.subtle{color:#5F6B7A; font-size:14px;}
-.divider{height:1px; background:#ECF3FF; margin:12px 0 18px 0;}
+
+.subtle{color:#475569; font-size:14px; margin-top:6px;}
+.divider{height:1px; background:#E6F0FF; margin:12px 0 18px 0;}
+
+.stButton button {
+  background: linear-gradient(90deg,#1565C0,#00BFA5) !important;
+  color: white !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  padding: 0.75rem 1rem !important;
+  font-weight: 800 !important;
+}
 </style>
 """
-st.markdown(BRIGHT_CSS, unsafe_allow_html=True)
+st.markdown(CSS, unsafe_allow_html=True)
 
 
 def card_open():
@@ -65,7 +75,7 @@ def bright_header(title: str, subtitle: str):
 
 
 # =========================
-# Session State
+# Session state
 # =========================
 def init_state():
     if "menu" not in st.session_state:
@@ -84,7 +94,7 @@ init_state()
 
 
 # =========================
-# NLTK resources safe
+# Utilities
 # =========================
 def ensure_nltk():
     try:
@@ -93,25 +103,38 @@ def ensure_nltk():
         nltk.download("stopwords")
 
 
+def to_text(x) -> str:
+    if x is None:
+        return ""
+    if isinstance(x, float) and np.isnan(x):
+        return ""
+    return str(x)
+
+
+@st.cache_resource
+def get_stemmer():
+    return StemmerFactory().create_stemmer()
+
+
 # =========================
-# Scraping (simple)
+# Scraping helper
 # =========================
 def scrape_google_play(app_id: str, jumlah: int, bahasa="id", negara="id"):
     all_rows = []
-    count = 0
     next_token = None
 
-    while count < jumlah:
+    while len(all_rows) < jumlah:
         batch, next_token = reviews(
             app_id,
             lang=bahasa,
             country=negara,
             sort=Sort.NEWEST,
-            count=min(200, jumlah - count),
+            count=min(200, jumlah - len(all_rows)),
             continuation_token=next_token,
         )
         if not batch:
             break
+
         for r in batch:
             all_rows.append(
                 {
@@ -121,7 +144,7 @@ def scrape_google_play(app_id: str, jumlah: int, bahasa="id", negara="id"):
                     "content": r.get("content"),
                 }
             )
-        count = len(all_rows)
+
         if next_token is None:
             break
 
@@ -129,86 +152,38 @@ def scrape_google_play(app_id: str, jumlah: int, bahasa="id", negara="id"):
 
 
 # =========================
-# PREPROCESSING SAFE FUNCTIONS
-# (robust & minim error)
+# PREPROCESSING PIPELINE (aman)
 # =========================
-@st.cache_resource
-def get_stemmer():
-    factory = StemmerFactory()
-    return factory.create_stemmer()
-
-
-def to_text(x) -> str:
-    # aman untuk NaN / None
-    if x is None:
-        return ""
-    if isinstance(x, float) and np.isnan(x):
-        return ""
-    return str(x)
-
-
 def case_folding(text: str) -> str:
     return to_text(text).lower()
 
 
 def load_kamus_excel_safe(path: str) -> dict:
-    """
-    Aman: kalau file tidak ada / format tidak cocok, return dict kosong.
-    """
     try:
         df = pd.read_excel(path)
-        # coba cari kolom yang sesuai
-        possible_nonstd = ["non_standard", "nonstandard", "slang", "kata_tidak_baku"]
-        possible_std = ["standard_word", "standard", "kata_baku"]
-
-        col_nonstd = None
-        col_std = None
-        for c in possible_nonstd:
-            if c in df.columns:
-                col_nonstd = c
-                break
-        for c in possible_std:
-            if c in df.columns:
-                col_std = c
-                break
-
-        # fallback: kalau di file kamu memang "non_standard" dan "standard_word"
-        if col_nonstd is None and "non_standard" in df.columns:
-            col_nonstd = "non_standard"
-        if col_std is None and "standard_word" in df.columns:
-            col_std = "standard_word"
-
-        if col_nonstd is None or col_std is None:
-            return {}
-
-        df = df[[col_nonstd, col_std]].dropna()
-        return dict(zip(df[col_nonstd].astype(str), df[col_std].astype(str)))
+        # kolom yang umum
+        if "non_standard" in df.columns and "standard_word" in df.columns:
+            df = df[["non_standard", "standard_word"]].dropna()
+            return dict(zip(df["non_standard"].astype(str), df["standard_word"].astype(str)))
+        # fallback: kalau format beda, coba ambil 2 kolom pertama
+        if df.shape[1] >= 2:
+            df2 = df.iloc[:, :2].dropna()
+            return dict(zip(df2.iloc[:, 0].astype(str), df2.iloc[:, 1].astype(str)))
+        return {}
     except Exception:
         return {}
 
 
 def normalisasi_kamus(text: str, kamus: dict) -> str:
-    """
-    Aman: kalau kamus kosong, tidak mengubah teks.
-    """
     text = to_text(text)
     if not kamus:
         return text
     words = text.split()
-    out = [kamus.get(w, w) for w in words]
-    return " ".join(out)
+    return " ".join([kamus.get(w, w) for w in words])
 
 
 def data_cleansing(text: str) -> str:
-    """
-    Versi aman & sederhana:
-    - buang URL, mention, hashtag, angka
-    - buang emoji
-    - sisakan a-z dan spasi
-    - rapikan spasi
-    """
-    text = to_text(text)
-    text = text.lower()
+    text = to_text(text).lower()
     text = re.sub(r"http\S+|www\.\S+", " ", text)
     text = re.sub(r"@[A-Za-z0-9_]+", " ", text)
     text = re.sub(r"#[A-Za-z0-9_]+", " ", text)
@@ -219,40 +194,26 @@ def data_cleansing(text: str) -> str:
     return text
 
 
-def remove_stopwords_id(text: str) -> str:
-    text = to_text(text)
+def stopword_removal(text: str) -> str:
     sw = set(stopwords.words("indonesian"))
-    tokens = text.split()
+    tokens = to_text(text).split()
     tokens = [t for t in tokens if t not in sw]
     return " ".join(tokens)
 
 
-def stemming_sastrawi(text: str) -> str:
-    text = to_text(text)
-    stemmer = get_stemmer()
-    return stemmer.stem(text)
+def stemming(text: str) -> str:
+    return get_stemmer().stem(to_text(text))
 
 
-def tokenizing_simple(text: str):
-    """
-    Tidak pakai nltk.word_tokenize agar minim error dependency.
-    Tokenisasi cukup split spasi (untuk app awam ini sudah oke).
-    """
-    text = to_text(text).strip()
-    if not text:
-        return []
-    return text.split()
+def tokenizing(text: str):
+    t = to_text(text).strip()
+    return t.split() if t else []
 
 
 # =========================
-# LABELING SAFE (Lexicon-based)
+# LABELING (lexicon, aman + fallback)
 # =========================
 def load_lexicon_safe(path: str) -> dict:
-    """
-    Format yang didukung:
-    - CSV: kata, skor
-    Aman jika ada header / baris kotor.
-    """
     lex = {}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -267,7 +228,6 @@ def load_lexicon_safe(path: str) -> dict:
                 try:
                     lex[w] = int(float(s))
                 except:
-                    # skip jika skor bukan angka
                     pass
     except Exception:
         pass
@@ -275,14 +235,6 @@ def load_lexicon_safe(path: str) -> dict:
 
 
 def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
-    """
-    Skor = jumlah bobot kata positif - negatif.
-    Label:
-    - score > 0 => positif
-    - score < 0 => negatif
-    - else => netral
-    Aman untuk token kosong.
-    """
     score = 0
     for t in tokens:
         if t in lex_pos:
@@ -300,16 +252,15 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 
 
 # =========================
-# Sidebar Menu
+# Sidebar navigation
 # =========================
 with st.sidebar:
     st.markdown("### 🧭 Navigasi")
-    menu = st.radio(
+    st.session_state.menu = st.radio(
         "Pilih menu",
         ["Home", "Dataset", "Preprocessing", "Klasifikasi SVM"],
         index=["Home", "Dataset", "Preprocessing", "Klasifikasi SVM"].index(st.session_state.menu),
     )
-    st.session_state.menu = menu
 
     st.markdown("---")
     st.markdown("### ✅ Status")
@@ -324,80 +275,58 @@ with st.sidebar:
         st.info("Kolom teks: belum dipilih")
 
     if st.session_state.final_df is not None:
-        st.success("Data siap untuk SVM")
+        st.success("Siap untuk SVM")
 
 
 # =========================
-# HOME
+# MENU: HOME
 # =========================
 if st.session_state.menu == "Home":
-    bright_header(
-        "💬 Sentimen Analyzer",
-        "Untuk orang awam: ambil dataset → preprocessing bertahap → klasifikasi SVM.",
+    bright_header("💬 Sentimen Analyzer", "Ambil dataset → preprocessing bertahap → klasifikasi SVM (hasil langsung).")
+
+    card_open()
+    st.markdown(
+        """
+#### Apa yang bisa kamu lakukan?
+- **Dataset**: scraping ulasan Google Play atau upload CSV/Excel.
+- **Preprocessing**: tampil **bertahap** agar mudah dibandingkan.
+- **Klasifikasi SVM**: lihat **confusion matrix, classification report, dan akurasi**.
+        """.strip()
     )
+    card_close()
 
-    col1, col2 = st.columns([1.2, 1])
-    with col1:
-        card_open()
-        st.markdown("#### Tentang aplikasi ini")
-        st.markdown(
-            """
-Aplikasi ini membantu kamu melakukan:
-- **Scraping ulasan Google Play** atau **upload dataset**,
-- Memilih kolom teks,
-- **Preprocessing bertahap** (kamu bisa bandingkan hasil tiap tahap),
-- **Pelabelan sentimen** berbasis lexicon,
-- **Klasifikasi SVM** (TF-IDF, split 80/20) dan lihat hasilnya.
-            """.strip()
-        )
-        card_close()
-
-        if st.button("🚀 Mulai", use_container_width=True):
-            st.session_state.menu = "Dataset"
-            st.rerun()
-
-    with col2:
-        card_open()
-        st.markdown("#### Catatan")
-        st.markdown(
-            """
-- Untuk preprocessing & pelabelan, file lexicon/kamus **opsional**.
-- Jika file tidak ada, preprocessing tetap jalan (normalisasi dilewati, pelabelan pakai aturan sederhana).
-            """.strip()
-        )
-        card_close()
+    st.markdown("")
+    if st.button("🚀 Mulai", use_container_width=True):
+        st.session_state.menu = "Dataset"
+        st.rerun()
 
 
 # =========================
-# DATASET
+# MENU: DATASET
 # =========================
 elif st.session_state.menu == "Dataset":
-    bright_header(
-        "📦 Dataset",
-        "Pilih sumber dataset: scraping Google Play atau upload CSV/Excel. Lalu pilih kolom teks.",
-    )
+    bright_header("📦 Dataset", "Pilih sumber dataset, lalu pilih kolom teks untuk dianalisis.")
 
-    tab1, tab2 = st.tabs(["🕷️ Scraping Google Play", "📤 Upload Dataset"])
+    tab1, tab2 = st.tabs(["🕷️ Scraping Google Play", "📤 Upload CSV/Excel"])
 
     with tab1:
         card_open()
-        st.markdown("#### Scraping super sederhana")
-        st.caption("Masukkan App ID → jumlah ulasan → klik tombol.")
+        st.markdown("#### Scraping sederhana (orang awam)")
         app_id = st.text_input("App ID Google Play", placeholder="contoh: com.whatsapp")
         jumlah = st.number_input("Jumlah ulasan", min_value=50, max_value=5000, value=200, step=50)
         bahasa = st.selectbox("Bahasa", ["id", "en"], index=0)
         negara = st.selectbox("Negara", ["id", "us", "sg", "my"], index=0)
 
-        cA, cB = st.columns(2)
-        with cA:
-            do_scrape = st.button("🧲 Mulai Scraping", use_container_width=True)
-        with cB:
-            if st.button("🧹 Reset Dataset", use_container_width=True):
-                st.session_state.raw_df = None
-                st.session_state.text_col = None
-                st.session_state.prep_steps = {}
-                st.session_state.final_df = None
-                st.rerun()
+        c1, c2 = st.columns(2)
+        do_scrape = c1.button("🧲 Mulai Scraping", use_container_width=True)
+        do_reset = c2.button("🧹 Reset Dataset", use_container_width=True)
+
+        if do_reset:
+            st.session_state.raw_df = None
+            st.session_state.text_col = None
+            st.session_state.prep_steps = {}
+            st.session_state.final_df = None
+            st.rerun()
 
         if do_scrape:
             if not app_id.strip():
@@ -417,7 +346,6 @@ elif st.session_state.menu == "Dataset":
 
     with tab2:
         card_open()
-        st.markdown("#### Upload CSV / Excel")
         file = st.file_uploader("Upload dataset", type=["csv", "xlsx", "xls"])
         if file is not None:
             try:
@@ -425,16 +353,12 @@ elif st.session_state.menu == "Dataset":
                     df = pd.read_csv(file)
                 else:
                     df = pd.read_excel(file)
-
                 st.session_state.raw_df = df
-                # auto-guess kolom teks
                 cols = list(df.columns)
-                guess = "content" if "content" in cols else cols[0]
-                st.session_state.text_col = guess
-
+                st.session_state.text_col = "content" if "content" in cols else cols[0]
                 st.session_state.prep_steps = {}
                 st.session_state.final_df = None
-                st.success(f"Dataset berhasil di-load: {len(df)} baris, {df.shape[1]} kolom.")
+                st.success(f"Dataset berhasil di-load: {len(df)} baris.")
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
         card_close()
@@ -442,17 +366,16 @@ elif st.session_state.menu == "Dataset":
     if st.session_state.raw_df is not None:
         st.markdown("")
         card_open()
-        st.markdown("#### Preview Dataset")
+        st.markdown("#### Preview dataset")
         st.dataframe(st.session_state.raw_df.head(50), use_container_width=True)
         card_close()
 
         st.markdown("")
         card_open()
-        st.markdown("#### Pilih kolom teks")
+        st.markdown("#### Pilih kolom teks untuk analisis")
         cols = list(st.session_state.raw_df.columns)
         idx = cols.index(st.session_state.text_col) if st.session_state.text_col in cols else 0
-        st.session_state.text_col = st.selectbox("Kolom yang dianalisis", cols, index=idx)
-
+        st.session_state.text_col = st.selectbox("Kolom teks", cols, index=idx)
         if st.button("➡️ Lanjut ke Preprocessing", use_container_width=True):
             st.session_state.menu = "Preprocessing"
             st.rerun()
@@ -462,13 +385,10 @@ elif st.session_state.menu == "Dataset":
 
 
 # =========================
-# PREPROCESSING
+# MENU: PREPROCESSING
 # =========================
 elif st.session_state.menu == "Preprocessing":
-    bright_header(
-        "🧼 Preprocessing",
-        "Klik tombol, lalu hasil tiap langkah akan muncul agar mudah dibandingkan.",
-    )
+    bright_header("🧼 Preprocessing", "Klik tombol, lalu hasil tiap langkah akan muncul untuk dibandingkan.")
 
     if st.session_state.raw_df is None or not st.session_state.text_col:
         st.warning("Dataset/kolom teks belum siap. Kembali ke menu Dataset.")
@@ -476,41 +396,38 @@ elif st.session_state.menu == "Preprocessing":
 
     ensure_nltk()
 
+    # otomatis, tanpa input path
     ASSETS_DIR = "assets"
-    kamus_path = os.path.join(ASSETS_DIR, "kamus.xlsx")  # boleh kamu rename bebas
-    lex_pos_path = os.path.join(ASSETS_DIR, "positive.csv")
-    lex_neg_path = os.path.join(ASSETS_DIR, "negative.csv")
+    KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
+    LEX_POS_PATH = os.path.join(ASSETS_DIR, "positive.csv")
+    LEX_NEG_PATH = os.path.join(ASSETS_DIR, "negative.csv")
 
-    colL, colR = st.columns([1.1, 1])
-    with colL:
-        card_open()
-        st.markdown("#### Pengaturan file (opsional)")
-        st.caption("Kalau file tidak ada, aplikasi tetap jalan (normalisasi dilewati, lexicon fallback).")
-        kamus_path = st.text_input("Path Kamus Excel (opsional)", value=kamus_path)
-        lex_pos_path = st.text_input("Path Lexicon Positif (opsional)", value=lex_pos_path)
-        lex_neg_path = st.text_input("Path Lexicon Negatif (opsional)", value=lex_neg_path)
-        card_close()
+    # status file (tanpa text_input)
+    card_open()
+    st.markdown("#### File pendukung (otomatis)")
+    ok_kamus = os.path.exists(KAMUS_PATH)
+    ok_pos = os.path.exists(LEX_POS_PATH)
+    ok_neg = os.path.exists(LEX_NEG_PATH)
+    st.write("📘 Kamus:", "✅ ditemukan" if ok_kamus else "⚠️ tidak ada (normalisasi dilewati)")
+    st.write("🟢 Lexicon +:", "✅ ditemukan" if ok_pos else "⚠️ tidak ada (label fallback)")
+    st.write("🔴 Lexicon -:", "✅ ditemukan" if ok_neg else "⚠️ tidak ada (label fallback)")
+    card_close()
 
-    with colR:
-        card_open()
-        drop_neutral = st.checkbox("Hapus data netral (score = 0)", value=True)
-        st.caption("Jika dicentang, hanya positif & negatif yang lanjut ke SVM.")
-        card_close()
+    drop_neutral = st.checkbox("Hapus data netral (score=0)", value=True)
 
-    st.markdown("")
     run_prep = st.button("⚙️ Jalankan Preprocessing", use_container_width=True)
 
-    def show_compare(step_name, before_df, after_df, preview=15):
+    def show_compare(title, before_df, after_df, n=15):
         st.markdown("")
         card_open()
-        st.markdown(f"### {step_name}")
+        st.markdown(f"### {title}")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Sebelum**")
-            st.dataframe(before_df[["content"]].head(preview), use_container_width=True)
+            st.dataframe(before_df[["content"]].head(n), use_container_width=True)
         with c2:
             st.markdown("**Sesudah**")
-            st.dataframe(after_df[["content"]].head(preview), use_container_width=True)
+            st.dataframe(after_df[["content"]].head(n), use_container_width=True)
         card_close()
 
     if run_prep:
@@ -522,52 +439,43 @@ elif st.session_state.menu == "Preprocessing":
 
         st.session_state.prep_steps = {}
         st.session_state.final_df = None
-
         st.session_state.prep_steps["0) Data Awal"] = df0.copy()
 
-        # 1) Case folding
         df1 = df0.copy()
         df1["content"] = df1["content"].apply(case_folding)
         st.session_state.prep_steps["1) Case Folding"] = df1.copy()
 
-        # 2) Normalisasi (kamus) - aman jika file tidak ada
-        kamus = load_kamus_excel_safe(kamus_path) if os.path.exists(kamus_path) else {}
+        kamus = load_kamus_excel_safe(KAMUS_PATH) if ok_kamus else {}
         df2 = df1.copy()
         df2["content"] = df2["content"].apply(lambda x: normalisasi_kamus(x, kamus))
-        st.session_state.prep_steps["2) Normalisasi (Kamus)"] = df2.copy()
+        st.session_state.prep_steps["2) Normalisasi"] = df2.copy()
 
-        # 3) Cleansing
         df3 = df2.copy()
         df3["content"] = df3["content"].apply(data_cleansing)
         st.session_state.prep_steps["3) Data Cleansing"] = df3.copy()
 
-        # 4) Stopword removal
         df4 = df3.copy()
-        df4["content"] = df4["content"].apply(remove_stopwords_id)
+        df4["content"] = df4["content"].apply(stopword_removal)
         st.session_state.prep_steps["4) Stopword Removal"] = df4.copy()
 
-        # 5) Stemming
         df5 = df4.copy()
-        df5["content"] = df5["content"].apply(stemming_sastrawi)
+        df5["content"] = df5["content"].apply(stemming)
         st.session_state.prep_steps["5) Stemming"] = df5.copy()
 
-        # 6) Tokenizing
         df6 = df5.copy()
-        df6["tokens"] = df6["content"].apply(tokenizing_simple)
+        df6["tokens"] = df6["content"].apply(tokenizing)
         st.session_state.prep_steps["6) Tokenizing"] = df6.copy()
 
-        # 7) Labeling (lexicon) - aman jika file tidak ada
-        lex_pos = load_lexicon_safe(lex_pos_path) if os.path.exists(lex_pos_path) else {}
-        lex_neg = load_lexicon_safe(lex_neg_path) if os.path.exists(lex_neg_path) else {}
+        lex_pos = load_lexicon_safe(LEX_POS_PATH) if ok_pos else {}
+        lex_neg = load_lexicon_safe(LEX_NEG_PATH) if ok_neg else {}
 
         df7 = df6.copy()
         if lex_pos or lex_neg:
-            # lexicon-based
-            res = df7["tokens"].apply(lambda toks: label_by_lexicon(toks, lex_pos, lex_neg))
+            res = df7["tokens"].apply(lambda t: label_by_lexicon(t, lex_pos, lex_neg))
             df7["score"] = res.apply(lambda x: x[0])
             df7["Sentimen"] = res.apply(lambda x: x[1])
         else:
-            # fallback sederhana agar tidak error: panjang token -> label
+            # fallback aman
             df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
             df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
 
@@ -577,13 +485,12 @@ elif st.session_state.menu == "Preprocessing":
         st.session_state.prep_steps["7) Pelabelan"] = df7.copy()
         st.session_state.final_df = df7.copy()
 
-        st.success("Preprocessing selesai! Scroll ke bawah untuk membandingkan tiap tahap.")
+        st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
 
-    # tampilkan hasil bertahap
+    # tampilkan hasil bertahap (kalau sudah ada)
     steps = st.session_state.prep_steps
     if steps:
         keys = list(steps.keys())
-
         for i in range(1, len(keys)):
             before = steps[keys[i - 1]]
             after = steps[keys[i]]
@@ -600,6 +507,7 @@ elif st.session_state.menu == "Preprocessing":
                     st.markdown("**Sesudah (tokens)**")
                     st.dataframe(after[["content", "tokens"]].head(15), use_container_width=True)
                 card_close()
+
             elif keys[i].startswith("7) Pelabelan"):
                 st.markdown("")
                 card_open()
@@ -618,13 +526,10 @@ elif st.session_state.menu == "Preprocessing":
 
 
 # =========================
-# KLASIFIKASI SVM
+# MENU: KLASIFIKASI SVM
 # =========================
 elif st.session_state.menu == "Klasifikasi SVM":
-    bright_header(
-        "🧠 Klasifikasi SVM",
-        "Klik tombol untuk melihat confusion matrix, classification report, dan akurasi.",
-    )
+    bright_header("🧠 Klasifikasi SVM", "Klik tombol untuk melihat confusion matrix, report, dan akurasi.")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
@@ -644,18 +549,15 @@ elif st.session_state.menu == "Klasifikasi SVM":
         X = df["content"].astype(str).fillna("")
         y = df["Sentimen"].astype(str)
 
-        # Split 80/20
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42,
             stratify=y if len(y.unique()) > 1 else None
         )
 
-        # TF-IDF (tidak ditampilkan)
         tfidf = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
         X_train_vec = tfidf.fit_transform(X_train)
         X_test_vec = tfidf.transform(X_test)
 
-        # SVM
         model = LinearSVC()
         model.fit(X_train_vec, y_train)
         y_pred = model.predict(X_test_vec)
@@ -669,7 +571,6 @@ elif st.session_state.menu == "Klasifikasi SVM":
         st.markdown(f"### ✅ Akurasi: `{acc:.4f}`")
         card_close()
 
-        # Confusion matrix
         st.markdown("")
         card_open()
         st.markdown("### Confusion Matrix")
@@ -693,7 +594,6 @@ elif st.session_state.menu == "Klasifikasi SVM":
         st.pyplot(fig)
         card_close()
 
-        # Classification report
         st.markdown("")
         card_open()
         st.markdown("### Classification Report")
