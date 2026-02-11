@@ -760,7 +760,7 @@ elif st.session_state.menu == "Preprocessing":
         lex_pos = load_lexicon_safe(LEX_POS_PATH) if ok_pos else {}
         lex_neg = load_lexicon_safe(LEX_NEG_PATH) if ok_neg else {}
 
-                # ===== 7) Pelabelan (SEBELUM FILTER) =====
+        # ===== 7) Pelabelan (SEBELUM FILTER) =====
         df7_before = df6.copy()
 
         if lex_pos or lex_neg:
@@ -774,6 +774,18 @@ elif st.session_state.menu == "Preprocessing":
             df7_before["Sentimen"] = df7_before["score"].apply(
                 lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral")
             )
+
+        # simpan versi sebelum filter netral
+        st.session_state.prep_steps["7) Pelabelan (sebelum filter netral)"] = df7_before.copy()
+
+        # ===== FILTER NETRAL (SESUDAH FILTER) =====
+        df7_after = df7_before.copy()
+        if drop_neutral:
+            df7_after = df7_after[df7_after["Sentimen"] != "netral"].reset_index(drop=True)
+
+        st.session_state.prep_steps["7) Pelabelan Sentimen"] = df7_after.copy()
+        st.session_state.final_df = df7_after.copy()
+
 
         # simpan versi sebelum filter netral
         st.session_state.prep_steps["7) Pelabelan (sebelum filter netral)"] = df7_before.copy()
