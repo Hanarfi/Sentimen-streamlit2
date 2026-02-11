@@ -821,7 +821,7 @@ elif st.session_state.menu == "Preprocessing":
                     st.dataframe(after[["content", "tokens"]].head(15), use_container_width=True)
                 card_close()
     
-                        elif keys[i].startswith("7) Pelabelan Sentimen"):
+                elif keys[i].startswith("7) Pelabelan Sentimen"):
                 st.markdown("")
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
