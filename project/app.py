@@ -255,12 +255,35 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 # Sidebar navigation
 # =========================
 with st.sidebar:
-    st.markdown("### 🧭 Navigasi")
-    st.session_state.menu = st.radio(
-        "Pilih menu",
-        ["Home", "Dataset", "Preprocessing", "Klasifikasi SVM"],
-        index=["Home", "Dataset", "Preprocessing", "Klasifikasi SVM"].index(st.session_state.menu),
-    )
+    st.st.markdown("### 🧭 Navigasi")
+
+    if st.button("🏠 Home", use_container_width=True):
+        st.session_state.menu = "Home"
+        st.rerun()
+    
+    if st.button("📦 Dataset", use_container_width=True):
+        st.session_state.menu = "Dataset"
+        st.rerun()
+    
+    if st.button("🧼 Preprocessing", use_container_width=True):
+        st.session_state.menu = "Preprocessing"
+        st.rerun()
+    
+    if st.button("🧠 Klasifikasi SVM", use_container_width=True):
+        st.session_state.menu = "Klasifikasi SVM"
+        st.rerun()
+
+
+    st.markdown("---")
+    st.markdown("### 🔄 Reset Aplikasi")
+    if st.button("🧹 Reset & Kembali ke Home", use_container_width=True):
+        # reset semua proses
+        st.session_state.raw_df = None
+        st.session_state.text_col = None
+        st.session_state.prep_steps = {}
+        st.session_state.final_df = None
+        st.session_state.menu = "Home"
+        st.rerun()
 
     st.markdown("---")
     st.markdown("### ✅ Status")
@@ -276,6 +299,7 @@ with st.sidebar:
 
     if st.session_state.final_df is not None:
         st.success("Siap untuk SVM")
+
 
 
 # =========================
