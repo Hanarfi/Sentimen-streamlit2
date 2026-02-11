@@ -854,7 +854,23 @@ elif st.session_state.menu == "Preprocessing":
     
             else:
                 show_compare(keys[i], before, after)
-    
+
+          # ✅ Narasi awam: berapa netral yang dihapus
+          if before_label_df is not None and "Sentimen" in before_label_df.columns:
+              netral_sebelum = int((before_label_df["Sentimen"] == "netral").sum())
+              total_sebelum = int(len(before_label_df))
+              total_sesudah = int(len(after))
+      
+              if drop_neutral:
+                  st.caption(
+                      f"📌 Sebelum filter ada **{netral_sebelum}** data netral dari total **{total_sebelum}**. "
+                      f"Setelah filter, tersisa **{total_sesudah}** data (hanya positif & negatif)."
+                  )
+              else:
+                  st.caption(
+                      f"📌 Filter netral tidak diaktifkan. Data netral tetap ikut dihitung: **{netral_sebelum}** dari **{total_sebelum}**."
+                  )
+
         st.markdown("")
         if st.button("➡️ Lanjut ke Klasifikasi SVM", use_container_width=True):
             st.session_state.menu = "Klasifikasi SVM"
