@@ -255,7 +255,7 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 # Sidebar navigation
 # =========================
 with st.sidebar:
-    st.st.markdown("### 🧭 Navigasi")
+    st.markdown("### 🧭 Navigasi")
 
     if st.button("🏠 Home", use_container_width=True):
         st.session_state.menu = "Home"
