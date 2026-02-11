@@ -573,9 +573,6 @@ elif st.session_state.menu == "Dataset":
         st.info("Silakan scraping atau upload dataset dulu.")
 
 
-# =========================
-# MENU: PREPROCESSING
-# =========================
 
 import html
 import difflib
@@ -654,6 +651,10 @@ def show_change_summary_and_examples(step_title: str, before_df: pd.DataFrame, a
             unsafe_allow_html=True
         )
 
+
+# =========================
+# MENU: PREPROCESSING
+# =========================
 
 
 elif st.session_state.menu == "Preprocessing":
