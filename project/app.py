@@ -312,7 +312,11 @@ elif st.session_state.menu == "Dataset":
     with tab1:
         card_open()
         st.markdown("#### Scraping Ulasan Google Play")
-        app_id = st.text_input("App ID Google Play", placeholder="contoh: co.id.bankbsi.superapp")
+        app_id = st.text_input(
+            "App ID Google Play",
+            value="co.id.bankbsi.superapp",
+            help="App ID default sudah diisi untuk Bank BSI Super App"
+        )
         jumlah = st.number_input("Jumlah ulasan", min_value=50, max_value=5000, value=200, step=50)
         bahasa = st.selectbox("Bahasa", ["id", "en"], index=0)
         negara = st.selectbox("Negara", ["id", "us", "sg", "my"], index=0)
