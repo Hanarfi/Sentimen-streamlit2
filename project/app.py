@@ -737,12 +737,13 @@ elif st.session_state.menu == "Preprocessing":
 
         kamus = load_kamus_excel_safe(KAMUS_PATH) if ok_kamus else {}
         df2 = df1.copy()
-        df2["content"] = df2["content"].apply(lambda x: normalisasi_kamus(x, kamus))
-        st.session_state.prep_steps["2) Normalisasi"] = df2.copy()
-
+        df2["content"] = df2["content"].apply(data_cleansing)
+        st.session_state.prep_steps["2) Data Cleansing"] = df2.copy()
+        
+        kamus = load_kamus_excel_safe(KAMUS_PATH) if ok_kamus else {}
         df3 = df2.copy()
-        df3["content"] = df3["content"].apply(data_cleansing)
-        st.session_state.prep_steps["3) Data Cleansing"] = df3.copy()
+        df3["content"] = df3["content"].apply(lambda x: normalisasi_kamus(x, kamus))
+        st.session_state.prep_steps["3) Normalisasi"] = df3.copy()
 
         df4 = df3.copy()
         df4["content"] = df4["content"].apply(stopword_removal)
