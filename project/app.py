@@ -55,12 +55,7 @@ CSS = """
   padding: 0.75rem 1rem !important;
   font-weight: 800 !important;
 }
-</style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
 
-st.markdown("""
-<style>
 /* ===== Sidebar nav modern ===== */
 .nav-wrap {
   background: #FFFFFF;
@@ -107,7 +102,10 @@ st.markdown("""
   border: 1px solid rgba(255,255,255,0.25);
 }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+True)
 
 
 
