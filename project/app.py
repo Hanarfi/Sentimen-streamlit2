@@ -769,12 +769,19 @@ elif st.session_state.menu == "Preprocessing":
             # fallback aman
             df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
             df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
-
+        
+        # ✅ simpan sebelum filter netral
+        df7_all = df7.copy()
+        
+        # ✅ baru filter netral (kalau dipilih)
         if drop_neutral:
             df7 = df7[df7["Sentimen"] != "netral"].reset_index(drop=True)
-
-        st.session_state.prep_steps["7) Pelabelan"] = df7.copy()
+        
+        # simpan keduanya di session_state (untuk UI)
+        st.session_state.prep_steps["7) Pelabelan (Sebelum Filter Netral)"] = df7_all.copy()
+        st.session_state.prep_steps["7) Pelabelan"] = df7.copy()  # ini versi "sesudah filter"
         st.session_state.final_df = df7.copy()
+
 
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
 
@@ -808,15 +815,42 @@ elif st.session_state.menu == "Preprocessing":
                 st.markdown("")
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
-    
-                st.markdown("**Distribusi label:**")
-                dist = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
-                st.dataframe(dist, use_container_width=True)
-    
+            
+                # ambil "sebelum filter netral" kalau ada
+                before_label_key = "7) Pelabelan (Sebelum Filter Netral)"
+                before_label_df = st.session_state.prep_steps.get(before_label_key, None)
+            
+                c1, c2 = st.columns(2)
+            
+                with c1:
+                    st.markdown("**Distribusi label (sebelum filter netral)**")
+                    if before_label_df is not None and "Sentimen" in before_label_df.columns:
+                        dist_before = (
+                            before_label_df["Sentimen"]
+                            .value_counts()
+                            .rename_axis("Label")
+                            .reset_index(name="Jumlah")
+                        )
+                        st.dataframe(dist_before, use_container_width=True)
+                    else:
+                        st.info("Data sebelum filter netral belum tersedia.")
+            
+                with c2:
+                    st.markdown("**Distribusi label (sesudah filter netral)**")
+                    dist_after = (
+                        after["Sentimen"]
+                        .value_counts()
+                        .rename_axis("Label")
+                        .reset_index(name="Jumlah")
+                    )
+                    st.dataframe(dist_after, use_container_width=True)
+
+
                 st.markdown("---")
-                st.markdown("**Contoh hasil pelabelan:**")
+                st.markdown("**Contoh hasil pelabelan (sesudah filter):**")
                 st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
                 card_close()
+
     
             else:
                 show_compare(keys[i], before, after)
