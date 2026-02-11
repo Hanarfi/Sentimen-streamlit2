@@ -148,6 +148,39 @@ section[data-testid="stSidebar"] div[role="progressbar"] {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* ===== Styling Tabs Modern ===== */
+
+/* Container tab */
+div[data-testid="stTabs"] {
+    margin-top: 10px;
+}
+
+/* Tab button */
+button[data-baseweb="tab"] {
+    font-weight: 700 !important;
+    font-size: 15px !important;
+    padding: 10px 18px !important;
+    border-radius: 12px 12px 0 0 !important;
+    background-color: #F1F5F9 !important;
+    color: #334155 !important;
+    border: none !important;
+    margin-right: 6px !important;
+}
+
+/* Tab aktif */
+button[data-baseweb="tab"][aria-selected="true"] {
+    background: linear-gradient(90deg,#1565C0,#00BFA5) !important;
+    color: white !important;
+}
+
+/* Hilangkan garis bawah default */
+div[data-testid="stTabs"] > div > div {
+    border-bottom: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 
