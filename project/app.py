@@ -31,7 +31,10 @@ st.set_page_config(page_title="Sentimen Analyzer", page_icon="💬", layout="wid
 # =========================
 CSS = """
 <style>
-.block-container {padding-top: 1.5rem; padding-bottom: 2rem;}
+.block-container{
+  padding-top: 3.2rem !important;
+  padding-bottom: 2rem !important;
+}
 
 .bright-card{
   background:#FFFFFF; border-radius:16px; padding:18px;
