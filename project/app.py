@@ -59,6 +59,57 @@ CSS = """
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* ===== Sidebar nav modern ===== */
+.nav-wrap {
+  background: #FFFFFF;
+  border: 1px solid #E6F0FF;
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+/* tombol nav (default) */
+.nav-wrap .stButton>button {
+  width: 100% !important;
+  background: #F3F8FF !important;
+  color: #0F172A !important;
+  border: 1px solid #E6F0FF !important;
+  border-radius: 12px !important;
+  padding: 10px 12px !important;
+  font-weight: 800 !important;
+  box-shadow: none !important;
+  margin: 6px 0 !important;
+  transition: all 0.15s ease-in-out;
+}
+
+.nav-wrap .stButton>button:hover {
+  transform: translateY(-1px);
+  border-color: #BBD7FF !important;
+}
+
+/* tombol nav aktif */
+.nav-wrap .nav-active .stButton>button {
+  background: linear-gradient(90deg,#1565C0,#00BFA5) !important;
+  color: #FFFFFF !important;
+  border: 0 !important;
+}
+
+/* badge kecil di kanan */
+.nav-badge {
+  float: right;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.25);
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 
 def card_open():
     st.markdown("<div class='bright-card'>", unsafe_allow_html=True)
@@ -255,50 +306,61 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 # Sidebar navigation
 # =========================
 with st.sidebar:
+    def go(menu_name: str):
+    st.session_state.menu = menu_name
+    st.rerun()
+
+    def nav_button(label: str, menu_name: str, icon: str, badge: str = ""):
+        is_active = (st.session_state.menu == menu_name)
+    
+        # wrapper untuk menandai active state via CSS class
+        if is_active:
+            st.markdown("<div class='nav-active'>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div>", unsafe_allow_html=True)
+    
+        # label dengan badge (opsional)
+        nice_label = f"{icon} {label}"
+        if badge:
+            nice_label = f"{nice_label} <span class='nav-badge'>{badge}</span>"
+    
+        if st.button(nice_label, use_container_width=True, key=f"nav_{menu_name}"):
+            go(menu_name)
+    
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    
     st.markdown("### 🧭 Navigasi")
+    st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
+      
+    nav_button("Home", "Home", "🏠")
+    nav_button("Dataset", "Dataset", "📦", badge="1")
+    nav_button("Preprocessing", "Preprocessing", "🧼", badge="2")
+    nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠", badge="3")
+      
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.button("🏠 Home", use_container_width=True):
-        st.session_state.menu = "Home"
-        st.rerun()
-    
-    if st.button("📦 Dataset", use_container_width=True):
-        st.session_state.menu = "Dataset"
-        st.rerun()
-    
-    if st.button("🧼 Preprocessing", use_container_width=True):
-        st.session_state.menu = "Preprocessing"
-        st.rerun()
-    
-    if st.button("🧠 Klasifikasi SVM", use_container_width=True):
-        st.session_state.menu = "Klasifikasi SVM"
-        st.rerun()
+st.markdown("---")
+st.markdown("### 🔄 Reset")
 
+if st.button("🧹 Reset & Kembali ke Home", use_container_width=True):
+    st.session_state.raw_df = None
+    st.session_state.text_col = None
+    st.session_state.prep_steps = {}
+    st.session_state.final_df = None
+    st.session_state.menu = "Home"
+    st.rerun()
 
-    st.markdown("---")
-    st.markdown("### 🔄 Reset Aplikasi")
-    if st.button("🧹 Reset & Kembali ke Home", use_container_width=True):
-        # reset semua proses
-        st.session_state.raw_df = None
-        st.session_state.text_col = None
-        st.session_state.prep_steps = {}
-        st.session_state.final_df = None
-        st.session_state.menu = "Home"
-        st.rerun()
+st.markdown("---")
+st.markdown("### 📈 Progress")
 
-    st.markdown("---")
-    st.markdown("### ✅ Status")
-    if st.session_state.raw_df is None:
-        st.warning("Dataset belum ada")
-    else:
-        st.success(f"Dataset: {len(st.session_state.raw_df)} baris")
-
-    if st.session_state.text_col:
-        st.info(f"Kolom teks: {st.session_state.text_col}")
-    else:
-        st.info("Kolom teks: belum dipilih")
-
-    if st.session_state.final_df is not None:
-        st.success("Siap untuk SVM")
+step = 0
+if st.session_state.raw_df is not None:
+    step = 1
+if st.session_state.final_df is not None:
+    step = 2
+st.progress(step / 2)
+st.caption(f"Langkah selesai: {step}/2 (Dataset → Preprocessing)")
 
 
 
