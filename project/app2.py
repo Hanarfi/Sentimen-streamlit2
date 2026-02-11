@@ -182,6 +182,39 @@ div[data-testid="stTabs"] > div > div {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+.diff-box{
+  background:#F8FAFC;
+  border:1px solid #E2E8F0;
+  border-radius:12px;
+  padding:12px;
+}
+.diff-before, .diff-after{
+  font-size:14px;
+  line-height:1.5;
+  margin: 6px 0;
+}
+.diff-tag{
+  font-weight:800;
+  color:#0F172A;
+  margin-right:8px;
+}
+.diff-add{
+  background: #DCFCE7;
+  border: 1px solid #86EFAC;
+  padding: 0px 4px;
+  border-radius: 6px;
+}
+.diff-del{
+  background: #FEE2E2;
+  border: 1px solid #FCA5A5;
+  padding: 0px 4px;
+  border-radius: 6px;
+  text-decoration: line-through;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 
@@ -428,7 +461,82 @@ with st.sidebar:
         st.rerun()
 
 
+import html
+import difflib
 
+def compute_changes(before_series: pd.Series, after_series: pd.Series, max_examples: int = 6):
+    b = before_series.astype(str).fillna("")
+    a = after_series.astype(str).fillna("")
+    changed_mask = b.ne(a)
+    changed_count = int(changed_mask.sum())
+    total = int(len(b))
+
+    examples = pd.DataFrame({
+        "Sebelum": b[changed_mask].head(max_examples).values,
+        "Sesudah": a[changed_mask].head(max_examples).values,
+    })
+    return changed_count, total, examples
+
+
+def diff_words_html(before_text: str, after_text: str) -> tuple[str, str]:
+    """
+    Highlight perbedaan kata:
+    - kata yang dihapus: merah + strikethrough
+    - kata yang ditambah: hijau
+    Return HTML untuk before dan after.
+    """
+    b_tokens = to_text(before_text).split()
+    a_tokens = to_text(after_text).split()
+
+    sm = difflib.SequenceMatcher(a=b_tokens, b=a_tokens)
+    b_out, a_out = [], []
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        b_chunk = [html.escape(t) for t in b_tokens[i1:i2]]
+        a_chunk = [html.escape(t) for t in a_tokens[j1:j2]]
+
+        if tag == "equal":
+            b_out.extend(b_chunk)
+            a_out.extend(a_chunk)
+        elif tag == "delete":
+            # hanya ada di before
+            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
+        elif tag == "insert":
+            # hanya ada di after
+            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
+        elif tag == "replace":
+            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
+            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
+
+    return " ".join(b_out), " ".join(a_out)
+
+
+def show_change_summary_and_examples(step_title: str, before_df: pd.DataFrame, after_df: pd.DataFrame, col: str = "content"):
+    changed_count, total, examples = compute_changes(before_df[col], after_df[col], max_examples=6)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total baris", total)
+    c2.metric("Baris berubah", changed_count)
+    pct = (changed_count / total * 100) if total else 0
+    c3.metric("Persentase berubah", f"{pct:.2f}%")
+
+    if changed_count == 0:
+        st.info("Tidak ada perubahan pada tahap ini.")
+        return
+
+    st.markdown("**Contoh perubahan (kata ditambah hijau, kata dihapus merah):**")
+
+    for idx, row in examples.iterrows():
+        b_html, a_html = diff_words_html(row["Sebelum"], row["Sesudah"])
+        st.markdown(
+            f"""
+<div class="diff-box">
+  <div class="diff-before"><span class="diff-tag">Sebelum:</span>{b_html}</div>
+  <div class="diff-after"><span class="diff-tag">Sesudah:</span>{a_html}</div>
+</div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # =========================
 # MENU: HOME
@@ -540,9 +648,15 @@ elif st.session_state.menu == "Dataset":
         st.info("Silakan scraping atau upload dataset dulu.")
 
 
+
+
+
+
 # =========================
 # MENU: PREPROCESSING
 # =========================
+
+
 elif st.session_state.menu == "Preprocessing":
     bright_header("🧼 Preprocessing", "Klik tombol, lalu hasil tiap langkah akan muncul untuk dibandingkan.")
 
@@ -577,6 +691,11 @@ elif st.session_state.menu == "Preprocessing":
         st.markdown("")
         card_open()
         st.markdown(f"### {title}")
+    
+        # ✅ Ringkasan + highlight contoh perubahan
+        show_change_summary_and_examples(title, before_df, after_df, col="content")
+    
+        st.markdown("---")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Sebelum**")
@@ -585,6 +704,7 @@ elif st.session_state.menu == "Preprocessing":
             st.markdown("**Sesudah**")
             st.dataframe(after_df[["content"]].head(n), use_container_width=True)
         card_close()
+
 
     if run_prep:
         base = st.session_state.raw_df.copy()
@@ -650,11 +770,16 @@ elif st.session_state.menu == "Preprocessing":
         for i in range(1, len(keys)):
             before = steps[keys[i - 1]]
             after = steps[keys[i]]
-
+    
             if keys[i].startswith("6) Tokenizing"):
                 st.markdown("")
                 card_open()
                 st.markdown("### 6) Tokenizing")
+    
+                st.markdown("**Contoh hasil token (teks → tokens):**")
+                st.dataframe(after[["content", "tokens"]].head(12), use_container_width=True)
+    
+                st.markdown("---")
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown("**Sebelum (teks)**")
@@ -663,22 +788,31 @@ elif st.session_state.menu == "Preprocessing":
                     st.markdown("**Sesudah (tokens)**")
                     st.dataframe(after[["content", "tokens"]].head(15), use_container_width=True)
                 card_close()
-
+    
             elif keys[i].startswith("7) Pelabelan"):
                 st.markdown("")
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
-                st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(30), use_container_width=True)
+    
+                st.markdown("**Distribusi label:**")
+                dist = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
+                st.dataframe(dist, use_container_width=True)
+    
+                st.markdown("---")
+                st.markdown("**Contoh hasil pelabelan:**")
+                st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
                 card_close()
+    
             else:
                 show_compare(keys[i], before, after)
-
+    
         st.markdown("")
         if st.button("➡️ Lanjut ke Klasifikasi SVM", use_container_width=True):
             st.session_state.menu = "Klasifikasi SVM"
             st.rerun()
     else:
         st.info("Klik tombol 'Jalankan Preprocessing' untuk memulai.")
+
 
 
 # =========================
