@@ -307,9 +307,9 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 # =========================
 with st.sidebar:
     def go(menu_name: str):
-    st.session_state.menu = menu_name
-    st.rerun()
-
+        st.session_state.menu = menu_name
+        st.rerun()
+    
     def nav_button(label: str, menu_name: str, icon: str, badge: str = ""):
         is_active = (st.session_state.menu == menu_name)
     
@@ -328,6 +328,18 @@ with st.sidebar:
             go(menu_name)
     
         st.markdown("</div>", unsafe_allow_html=True)
+
+
+st.markdown("### 🧭 Navigasi")
+st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
+
+nav_button("Home", "Home", "🏠")
+nav_button("Dataset", "Dataset", "📦", badge="1")
+nav_button("Preprocessing", "Preprocessing", "🧼", badge="2")
+nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠", badge="3")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
     
     
     st.markdown("### 🧭 Navigasi")
