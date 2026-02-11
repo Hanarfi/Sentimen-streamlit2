@@ -106,6 +106,46 @@ CSS = """
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* ===== Compact Sidebar ===== */
+section[data-testid="stSidebar"] .block-container {
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
+}
+
+/* perkecil jarak antar elemen */
+section[data-testid="stSidebar"] hr {
+  margin: 0.6rem 0 !important;
+}
+
+/* tombol sidebar lebih kecil */
+section[data-testid="stSidebar"] .stButton > button {
+  padding: 0.55rem 0.7rem !important;
+  font-size: 0.92rem !important;
+  border-radius: 12px !important;
+}
+
+/* teks di sidebar sedikit diperkecil */
+section[data-testid="stSidebar"] .stMarkdown, 
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] label {
+  font-size: 0.92rem !important;
+}
+
+/* caption diperkecil */
+section[data-testid="stSidebar"] .stCaption {
+  font-size: 0.8rem !important;
+}
+
+/* progress bar lebih tipis */
+section[data-testid="stSidebar"] div[role="progressbar"] {
+  height: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 
 
 
@@ -304,61 +344,52 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 # Sidebar navigation + Reset + Progress (FINAL)
 # =========================
 with st.sidebar:
-    def go(menu_name: str):
-        st.session_state.menu = menu_name
-        st.rerun()
+    # ===== NAV =====
+    st.markdown("### 🧭 Navigasi")
 
     def nav_button(label: str, menu_name: str, icon: str):
         is_active = (st.session_state.menu == menu_name)
-    
+
         if is_active:
             st.markdown("<div class='nav-active'>", unsafe_allow_html=True)
         else:
             st.markdown("<div>", unsafe_allow_html=True)
-    
-        nice_label = f"{icon} {label}"
+
         key_unique = f"navbtn_{menu_name}".replace(" ", "_")
-    
-        if st.button(nice_label, use_container_width=True, key=key_unique):
+
+        if st.button(f"{icon} {label}", use_container_width=True, key=key_unique):
             st.session_state.menu = menu_name
             st.rerun()
-    
+
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ===== NAV =====
-    st.markdown("### 🧭 Navigasi")
     st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
-
     nav_button("Home", "Home", "🏠")
     nav_button("Dataset", "Dataset", "📦")
     nav_button("Preprocessing", "Preprocessing", "🧼")
     nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠")
-
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ===== RESET =====
+    # ===== PROGRESS (ringkas) =====
     st.markdown("---")
-    st.markdown("### 🔄 Reset")
-    if st.button("🧹 Reset & Kembali ke Home", use_container_width=True, key="reset_sidebar_btn"):
-        st.session_state.raw_df = None
-        st.session_state.text_col = None
-        st.session_state.prep_steps = {}
-        st.session_state.final_df = None
-        st.session_state.menu = "Home"
-        st.rerun()
-
-    # ===== PROGRESS =====
-    st.markdown("---")
-    st.markdown("### 📈 Progress")
-
     step = 0
     if st.session_state.raw_df is not None:
         step = 1
     if st.session_state.final_df is not None:
         step = 2
 
+    st.markdown("**📈 Progress**")
     st.progress(step / 2)
-    st.caption(f"Langkah selesai: {step}/2 (Dataset → Preprocessing)")
+    st.caption(f"{step}/2 (Dataset → Preprocessing)")
+
+    # ===== RESET (ringkas) =====
+    if st.button("🔄 Reset", use_container_width=True, key="reset_sidebar_btn"):
+        st.session_state.raw_df = None
+        st.session_state.text_col = None
+        st.session_state.prep_steps = {}
+        st.session_state.final_df = None
+        st.session_state.menu = "Home"
+        st.rerun()
 
 
 
