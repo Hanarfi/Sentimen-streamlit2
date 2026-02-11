@@ -308,25 +308,21 @@ with st.sidebar:
         st.session_state.menu = menu_name
         st.rerun()
 
-    def nav_button(label: str, menu_name: str, icon: str, badge: str = ""):
+    def nav_button(label: str, menu_name: str, icon: str):
         is_active = (st.session_state.menu == menu_name)
-
-        # wrapper untuk active state
+    
         if is_active:
             st.markdown("<div class='nav-active'>", unsafe_allow_html=True)
         else:
             st.markdown("<div>", unsafe_allow_html=True)
-
+    
         nice_label = f"{icon} {label}"
-        if badge:
-            nice_label = f"{nice_label} <span class='nav-badge'>{badge}</span>"
-
-        # ✅ key unik (hindari DuplicateElementKey)
         key_unique = f"navbtn_{menu_name}".replace(" ", "_")
-
+    
         if st.button(nice_label, use_container_width=True, key=key_unique):
-            go(menu_name)
-
+            st.session_state.menu = menu_name
+            st.rerun()
+    
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ===== NAV =====
@@ -334,9 +330,9 @@ with st.sidebar:
     st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
 
     nav_button("Home", "Home", "🏠")
-    nav_button("Dataset", "Dataset", "📦", badge="1")
-    nav_button("Preprocessing", "Preprocessing", "🧼", badge="2")
-    nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠", badge="3")
+    nav_button("Dataset", "Dataset", "📦")
+    nav_button("Preprocessing", "Preprocessing", "🧼")
+    nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
