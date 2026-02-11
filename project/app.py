@@ -338,18 +338,7 @@ with st.sidebar:
     
     st.markdown("</div>", unsafe_allow_html=True)
 
-    
-    
-    st.markdown("### 🧭 Navigasi")
-    st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
-      
-    nav_button("Home", "Home", "🏠")
-    nav_button("Dataset", "Dataset", "📦", badge="1")
-    nav_button("Preprocessing", "Preprocessing", "🧼", badge="2")
-    nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠", badge="3")
-      
-    st.markdown("</div>", unsafe_allow_html=True)
-
+   
 st.markdown("---")
 st.markdown("### 🔄 Reset")
 
