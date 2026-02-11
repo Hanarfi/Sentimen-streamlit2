@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+scikit-learn
+matplotlib
+google-play-scraper
+nltk
+Sastrawi
+emoji
+openpyxl
