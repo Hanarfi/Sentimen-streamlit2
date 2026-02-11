@@ -301,65 +301,69 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 
 
 # =========================
-# Sidebar navigation
+# Sidebar navigation + Reset + Progress (FINAL)
 # =========================
 with st.sidebar:
     def go(menu_name: str):
         st.session_state.menu = menu_name
         st.rerun()
-    
+
     def nav_button(label: str, menu_name: str, icon: str, badge: str = ""):
         is_active = (st.session_state.menu == menu_name)
-    
-        # wrapper untuk menandai active state via CSS class
+
+        # wrapper untuk active state
         if is_active:
             st.markdown("<div class='nav-active'>", unsafe_allow_html=True)
         else:
             st.markdown("<div>", unsafe_allow_html=True)
-    
-        # label dengan badge (opsional)
+
         nice_label = f"{icon} {label}"
         if badge:
             nice_label = f"{nice_label} <span class='nav-badge'>{badge}</span>"
-    
-        if st.button(nice_label, use_container_width=True, key=f"nav_{menu_name}"):
+
+        # ✅ key unik (hindari DuplicateElementKey)
+        key_unique = f"navbtn_{menu_name}".replace(" ", "_")
+
+        if st.button(nice_label, use_container_width=True, key=key_unique):
             go(menu_name)
-    
+
         st.markdown("</div>", unsafe_allow_html=True)
 
-
+    # ===== NAV =====
     st.markdown("### 🧭 Navigasi")
     st.markdown('<div class="nav-wrap">', unsafe_allow_html=True)
-    
+
     nav_button("Home", "Home", "🏠")
     nav_button("Dataset", "Dataset", "📦", badge="1")
     nav_button("Preprocessing", "Preprocessing", "🧼", badge="2")
     nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠", badge="3")
-    
+
     st.markdown("</div>", unsafe_allow_html=True)
 
-   
-st.markdown("---")
-st.markdown("### 🔄 Reset")
+    # ===== RESET =====
+    st.markdown("---")
+    st.markdown("### 🔄 Reset")
+    if st.button("🧹 Reset & Kembali ke Home", use_container_width=True, key="reset_sidebar_btn"):
+        st.session_state.raw_df = None
+        st.session_state.text_col = None
+        st.session_state.prep_steps = {}
+        st.session_state.final_df = None
+        st.session_state.menu = "Home"
+        st.rerun()
 
-if st.button("🧹 Reset & Kembali ke Home", use_container_width=True):
-    st.session_state.raw_df = None
-    st.session_state.text_col = None
-    st.session_state.prep_steps = {}
-    st.session_state.final_df = None
-    st.session_state.menu = "Home"
-    st.rerun()
+    # ===== PROGRESS =====
+    st.markdown("---")
+    st.markdown("### 📈 Progress")
 
-st.markdown("---")
-st.markdown("### 📈 Progress")
+    step = 0
+    if st.session_state.raw_df is not None:
+        step = 1
+    if st.session_state.final_df is not None:
+        step = 2
 
-step = 0
-if st.session_state.raw_df is not None:
-    step = 1
-if st.session_state.final_df is not None:
-    step = 2
-st.progress(step / 2)
-st.caption(f"Langkah selesai: {step}/2 (Dataset → Preprocessing)")
+    st.progress(step / 2)
+    st.caption(f"Langkah selesai: {step}/2 (Dataset → Preprocessing)")
+
 
 
 
