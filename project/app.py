@@ -760,50 +760,21 @@ elif st.session_state.menu == "Preprocessing":
         lex_pos = load_lexicon_safe(LEX_POS_PATH) if ok_pos else {}
         lex_neg = load_lexicon_safe(LEX_NEG_PATH) if ok_neg else {}
 
-        # ===== 7) Pelabelan (SEBELUM FILTER) =====
-        df7_before = df6.copy()
-
+        df7 = df6.copy()
         if lex_pos or lex_neg:
-            res = df7_before["tokens"].apply(lambda t: label_by_lexicon(t, lex_pos, lex_neg))
-            df7_before["score"] = res.apply(lambda x: x[0])
-            df7_before["Sentimen"] = res.apply(lambda x: x[1])
+            res = df7["tokens"].apply(lambda t: label_by_lexicon(t, lex_pos, lex_neg))
+            df7["score"] = res.apply(lambda x: x[0])
+            df7["Sentimen"] = res.apply(lambda x: x[1])
         else:
-            df7_before["score"] = df7_before["tokens"].apply(
-                lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0)
-            )
-            df7_before["Sentimen"] = df7_before["score"].apply(
-                lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral")
-            )
+            # fallback aman
+            df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
+            df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
 
-        # simpan versi sebelum filter netral
-        st.session_state.prep_steps["7) Pelabelan (sebelum filter netral)"] = df7_before.copy()
-
-        # ===== FILTER NETRAL (SESUDAH FILTER) =====
-        df7_after = df7_before.copy()
         if drop_neutral:
-            df7_after = df7_after[df7_after["Sentimen"] != "netral"].reset_index(drop=True)
+            df7 = df7[df7["Sentimen"] != "netral"].reset_index(drop=True)
 
-        st.session_state.prep_steps["7) Pelabelan Sentimen"] = df7_after.copy()
-        st.session_state.final_df = df7_after.copy()
-
-
-        # simpan versi sebelum filter netral
-        st.session_state.prep_steps["7) Pelabelan (sebelum filter netral)"] = df7_before.copy()
-
-        # ===== FILTER NETRAL (SESUDAH FILTER) =====
-        df7_after = df7_before.copy()
-        if drop_neutral:
-            df7_after = df7_after[df7_after["Sentimen"] != "netral"].reset_index(drop=True)
-
-        st.session_state.prep_steps["7) Pelabelan Sentimen"] = df7_after.copy()
-        st.session_state.final_df = df7_after.copy()
-
-        
-        # simpan keduanya di session_state (untuk UI)
-        st.session_state.prep_steps["7) Pelabelan (Sebelum Filter Netral)"] = df7_all.copy()
-        st.session_state.prep_steps["7) Pelabelan"] = df7.copy()  # ini versi "sesudah filter"
+        st.session_state.prep_steps["7) Pelabelan"] = df7.copy()
         st.session_state.final_df = df7.copy()
-
 
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
 
@@ -838,31 +809,17 @@ elif st.session_state.menu == "Preprocessing":
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
     
-                # ambil distribusi yg sudah disimpan (lihat poin 2)
-                dist_before = st.session_state.get("label_dist_before")
-                dist_after  = st.session_state.get("label_dist_after")
-    
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Distribusi label (sebelum filter netral)**")
-                    if dist_before is not None:
-                        st.dataframe(dist_before, use_container_width=True)
-    
-                with c2:
-                    st.markdown("**Distribusi label (sesudah filter netral)**")
-                    if dist_after is not None:
-                        st.dataframe(dist_after, use_container_width=True)
+                st.markdown("**Distribusi label:**")
+                dist = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
+                st.dataframe(dist, use_container_width=True)
     
                 st.markdown("---")
-                st.markdown("**Contoh hasil pelabelan (sesudah filter):**")
+                st.markdown("**Contoh hasil pelabelan:**")
                 st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
                 card_close()
     
             else:
-                # selain pelabelan, tetap pakai show_compare
                 show_compare(keys[i], before, after)
-
-
     
         st.markdown("")
         if st.button("➡️ Lanjut ke Klasifikasi SVM", use_container_width=True):
