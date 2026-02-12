@@ -381,6 +381,21 @@ def tokenizing(text: str):
     t = to_text(text).strip()
     return t.split() if t else []
 
+def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")  # utf-8-sig biar aman di Excel
+
+def download_block(title: str, df: pd.DataFrame, filename: str):
+    st.markdown("### ⬇️ Download")
+    st.caption(title)
+    st.download_button(
+        label="📥 Download CSV",
+        data=df_to_csv_bytes(df),
+        file_name=filename,
+        mime="text/csv",
+        use_container_width=True
+    )
+
+
 
 # =========================
 # LABELING (lexicon, aman + fallback)
@@ -787,6 +802,35 @@ elif st.session_state.menu == "Preprocessing":
         st.session_state.final_df = df7.copy()
 
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
+        # setelah preprocessing selesai dan st.session_state.final_df sudah terisi
+        if st.session_state.final_df is not None:
+            st.markdown("")
+            card_open()
+            st.markdown("## 📦 Download Dataset Hasil Preprocessing")
+        
+            text_col = st.session_state.text_col
+            df_dl = st.session_state.final_df.copy()
+        
+            # pastikan kolom yang diminta ada
+            keep_cols = []
+            if text_col in df_dl.columns:
+                keep_cols.append(text_col)  # kolom asli yang dipilih user
+            if "content" in df_dl.columns:
+                keep_cols.append("content")  # hasil preprocessing final (opsional tapi berguna)
+            for c in ["tokens", "score", "Sentimen"]:
+                if c in df_dl.columns:
+                    keep_cols.append(c)
+        
+            df_dl = df_dl[keep_cols].copy()
+        
+            download_block(
+                title="Berisi kolom teks yang dipilih, hasil preprocessing, tokens, score, dan sentimen.",
+                df=df_dl,
+                filename="dataset_preprocessing.csv"
+            )
+        
+            card_close()
+
 
     # tampilkan hasil bertahap (kalau sudah ada)
     steps = st.session_state.prep_steps
@@ -1013,9 +1057,9 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 📘 Apa arti Precision / Recall / F1?")
+    st.markdown("### 📘 Classification Report")
 
-    with st.expander("Klik untuk lihat penjelasan sederhana"):
+    with st.expander("Klik untuk lihat penjelasan sederhana mengenai Precision/Recall/F1"):
         st.markdown(
             """
 - **Precision (ketepatan)**: Kalau model bilang “positif”, seberapa sering itu benar?
@@ -1031,6 +1075,83 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
+    # TOP KATA POSITIF/NEGATIF (berdasarkan bobot LinearSVC)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
+    
+    try:
+        feature_names = tfidf.get_feature_names_out()
+    
+        # LinearSVC binary: coef_.shape = (1, n_features)
+        # Tanda koefisien menunjukkan arah ke kelas tertentu.
+        # Kita cek kelas mana yang dianggap "positif" oleh model.
+        # classes_ berurutan alfabet: biasanya ['negatif','positif']
+        coef = model.coef_.ravel()
+    
+        # Jika kelas ke-1 adalah 'positif', koef positif = condong ke 'positif'
+        # Kalau tidak, balik interpretasinya.
+        # (Umumnya aman karena classes_ biasanya ['negatif','positif'])
+        classes = list(model.classes_)
+        if len(classes) == 2 and classes[1] == "positif":
+            pos_idx = np.argsort(coef)[-20:][::-1]   # top 20 bobot terbesar
+            neg_idx = np.argsort(coef)[:20]          # top 20 bobot terkecil
+            top_pos = pd.DataFrame({
+                "Kata/Ngram": feature_names[pos_idx],
+                "Bobot": coef[pos_idx]
+            })
+            top_neg = pd.DataFrame({
+                "Kata/Ngram": feature_names[neg_idx],
+                "Bobot": coef[neg_idx]
+            })
+        else:
+            # fallback kalau urutan kelas berbeda
+            # anggap bobot positif condong ke classes[1] (apa pun isinya)
+            pos_idx = np.argsort(coef)[-20:][::-1]
+            neg_idx = np.argsort(coef)[:20]
+            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
+            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
+    
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### 🟢 Top Kata Positif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
+            st.dataframe(top_pos, use_container_width=True)
+    
+        with c2:
+            st.markdown("#### 🔴 Top Kata Negatif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
+            st.dataframe(top_neg, use_container_width=True)
+    
+        # Optional download
+        st.markdown("---")
+        st.caption("Download top kata (positif & negatif)")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.download_button(
+                "📥 Download Top Kata Positif (CSV)",
+                data=top_pos.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_positif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_b:
+            st.download_button(
+                "📥 Download Top Kata Negatif (CSV)",
+                data=top_neg.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_negatif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    except Exception as e:
+        st.error(f"Gagal membuat top kata: {e}")
+    
+    card_close()
+
+
+    # ======================
     # CONTOH SALAH PREDIKSI (paling penting untuk awam)
     # ======================
     st.markdown("")
@@ -1039,7 +1160,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
 
     # Buat dataframe evaluasi
     eval_df = pd.DataFrame({
-        "Ulasan": X_test.values,
+        "content": X_test.values,
         "Label Asli": y_test.values,
         "Prediksi Model": y_pred
     })
@@ -1071,4 +1192,22 @@ elif st.session_state.menu == "Klasifikasi SVM":
     except Exception:
         st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
 
+    card_close()
+
+    st.markdown("")
+    card_open()
+    st.markdown("## 📦 Download Hasil Klasifikasi SVM")
+    
+    # dataset hasil klasifikasi (khusus data uji / test set)
+    df_svm_dl = eval_df.copy()
+    
+    # optional: tambahkan ringkasan model (akurasi) sebagai kolom konstan kalau mau
+    df_svm_dl["Akurasi_Model"] = round(acc, 6)
+    
+    download_block(
+        title="Berisi data uji (test set): content, label asli, prediksi model, dan skor keyakinan (jika tersedia).",
+        df=df_svm_dl,
+        filename="hasil_klasifikasi_svm_testset.csv"
+    )
+    
     card_close()
