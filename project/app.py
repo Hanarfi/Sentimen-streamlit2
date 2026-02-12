@@ -769,10 +769,28 @@ elif st.session_state.menu == "Preprocessing":
             # fallback aman
             df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
             df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
-
+        
+        # ✅ HITUNG JUMLAH NETRAL SEBELUM FILTER
+        dist_sebelum = df7["Sentimen"].value_counts()
+        jumlah_netral_sebelum = int(dist_sebelum.get("netral", 0))
+        
+        # ✅ TAMPILKAN JUMLAH NETRAL SEBELUM DIFILTER
+        st.markdown("### 📌 Info sebelum filter netral")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Positif", int(dist_sebelum.get("positif", 0)))
+        c2.metric("Negatif", int(dist_sebelum.get("negatif", 0)))
+        c3.metric("Netral (sebelum filter)", jumlah_netral_sebelum)
+        
+        # (opsional) tampilkan tabel distribusi lengkap sebelum filter
+        st.dataframe(
+            dist_sebelum.rename_axis("Label").reset_index(name="Jumlah"),
+            use_container_width=True
+        )
+        
+        # ✅ BARU FILTER NETRAL (JIKA DIPILIH)
         if drop_neutral:
             df7 = df7[df7["Sentimen"] != "netral"].reset_index(drop=True)
-
+        
         st.session_state.prep_steps["7) Pelabelan"] = df7.copy()
         st.session_state.final_df = df7.copy()
 
