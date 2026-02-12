@@ -1057,9 +1057,9 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 📘 Apa arti Precision / Recall / F1?")
+    st.markdown("### 📘 Classification Report")
 
-    with st.expander("Klik untuk lihat penjelasan sederhana"):
+    with st.expander("Klik untuk lihat penjelasan sederhana mengenai Precision/Recall/F1"):
         st.markdown(
             """
 - **Precision (ketepatan)**: Kalau model bilang “positif”, seberapa sering itu benar?
