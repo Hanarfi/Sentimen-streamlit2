@@ -802,7 +802,34 @@ elif st.session_state.menu == "Preprocessing":
         st.session_state.final_df = df7.copy()
 
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
+        # setelah preprocessing selesai dan st.session_state.final_df sudah terisi
+        if st.session_state.final_df is not None:
+            st.markdown("")
+            card_open()
+            st.markdown("## 📦 Download Dataset Hasil Preprocessing")
         
+            text_col = st.session_state.text_col
+            df_dl = st.session_state.final_df.copy()
+        
+            # pastikan kolom yang diminta ada
+            keep_cols = []
+            if text_col in df_dl.columns:
+                keep_cols.append(text_col)  # kolom asli yang dipilih user
+            if "content" in df_dl.columns:
+                keep_cols.append("content")  # hasil preprocessing final (opsional tapi berguna)
+            for c in ["tokens", "score", "Sentimen"]:
+                if c in df_dl.columns:
+                    keep_cols.append(c)
+        
+            df_dl = df_dl[keep_cols].copy()
+        
+            download_block(
+                title="Berisi kolom teks yang dipilih, hasil preprocessing, tokens, score, dan sentimen.",
+                df=df_dl,
+                filename="dataset_preprocessing.csv"
+            )
+        
+            card_close()
 
 
     # tampilkan hasil bertahap (kalau sudah ada)
@@ -1107,4 +1134,3 @@ elif st.session_state.menu == "Klasifikasi SVM":
     )
     
     card_close()
-
