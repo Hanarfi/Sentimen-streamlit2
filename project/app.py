@@ -833,34 +833,34 @@ elif st.session_state.menu == "Preprocessing":
                     st.dataframe(after[["content", "tokens"]].head(15), use_container_width=True)
                 card_close()
     
-        elif keys[i].startswith("7) Pelabelan"):
-            st.markdown("")
-            card_open()
-            st.markdown("### 7) Pelabelan Sentimen")
-
-            # ambil distribusi yg sudah disimpan (lihat poin 2)
-            dist_before = st.session_state.get("label_dist_before")
-            dist_after  = st.session_state.get("label_dist_after")
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Distribusi label (sebelum filter netral)**")
-                if dist_before is not None:
-                    st.dataframe(dist_before, use_container_width=True)
-
-            with c2:
-                st.markdown("**Distribusi label (sesudah filter netral)**")
-                if dist_after is not None:
-                    st.dataframe(dist_after, use_container_width=True)
-
-            st.markdown("---")
-            st.markdown("**Contoh hasil pelabelan (sesudah filter):**")
-            st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
-            card_close()
-
-        else:
-            # selain pelabelan, tetap pakai show_compare
-            show_compare(keys[i], before, after)
+            elif keys[i].startswith("7) Pelabelan"):
+                st.markdown("")
+                card_open()
+                st.markdown("### 7) Pelabelan Sentimen")
+    
+                # ambil distribusi yg sudah disimpan (lihat poin 2)
+                dist_before = st.session_state.get("label_dist_before")
+                dist_after  = st.session_state.get("label_dist_after")
+    
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Distribusi label (sebelum filter netral)**")
+                    if dist_before is not None:
+                        st.dataframe(dist_before, use_container_width=True)
+    
+                with c2:
+                    st.markdown("**Distribusi label (sesudah filter netral)**")
+                    if dist_after is not None:
+                        st.dataframe(dist_after, use_container_width=True)
+    
+                st.markdown("---")
+                st.markdown("**Contoh hasil pelabelan (sesudah filter):**")
+                st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
+                card_close()
+    
+            else:
+                # selain pelabelan, tetap pakai show_compare
+                show_compare(keys[i], before, after)
 
 
     
