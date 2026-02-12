@@ -1075,6 +1075,83 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
+    # TOP KATA POSITIF/NEGATIF (berdasarkan bobot LinearSVC)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
+    
+    try:
+        feature_names = tfidf.get_feature_names_out()
+    
+        # LinearSVC binary: coef_.shape = (1, n_features)
+        # Tanda koefisien menunjukkan arah ke kelas tertentu.
+        # Kita cek kelas mana yang dianggap "positif" oleh model.
+        # classes_ berurutan alfabet: biasanya ['negatif','positif']
+        coef = model.coef_.ravel()
+    
+        # Jika kelas ke-1 adalah 'positif', koef positif = condong ke 'positif'
+        # Kalau tidak, balik interpretasinya.
+        # (Umumnya aman karena classes_ biasanya ['negatif','positif'])
+        classes = list(model.classes_)
+        if len(classes) == 2 and classes[1] == "positif":
+            pos_idx = np.argsort(coef)[-20:][::-1]   # top 20 bobot terbesar
+            neg_idx = np.argsort(coef)[:20]          # top 20 bobot terkecil
+            top_pos = pd.DataFrame({
+                "Kata/Ngram": feature_names[pos_idx],
+                "Bobot": coef[pos_idx]
+            })
+            top_neg = pd.DataFrame({
+                "Kata/Ngram": feature_names[neg_idx],
+                "Bobot": coef[neg_idx]
+            })
+        else:
+            # fallback kalau urutan kelas berbeda
+            # anggap bobot positif condong ke classes[1] (apa pun isinya)
+            pos_idx = np.argsort(coef)[-20:][::-1]
+            neg_idx = np.argsort(coef)[:20]
+            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
+            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
+    
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### 🟢 Top Kata Positif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
+            st.dataframe(top_pos, use_container_width=True)
+    
+        with c2:
+            st.markdown("#### 🔴 Top Kata Negatif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
+            st.dataframe(top_neg, use_container_width=True)
+    
+        # Optional download
+        st.markdown("---")
+        st.caption("Download top kata (positif & negatif)")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.download_button(
+                "📥 Download Top Kata Positif (CSV)",
+                data=top_pos.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_positif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_b:
+            st.download_button(
+                "📥 Download Top Kata Negatif (CSV)",
+                data=top_neg.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_negatif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    except Exception as e:
+        st.error(f"Gagal membuat top kata: {e}")
+    
+    card_close()
+
+
+    # ======================
     # CONTOH SALAH PREDIKSI (paling penting untuk awam)
     # ======================
     st.markdown("")
