@@ -855,7 +855,20 @@ elif st.session_state.menu == "Preprocessing":
             st.session_state.menu = "Klasifikasi SVM"
             st.rerun()
 
-
+        # ✅ TARUH DOWNLOAD DI SINI (SETELAH tombol lanjut)
+        st.markdown("")
+        if st.session_state.final_df is not None:
+            card_open()
+            st.markdown("### ⬇️ Download Hasil Akhir Preprocessing (CSV)")
+            final_csv = st.session_state.final_df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="📥 Download CSV (Final Preprocessing)",
+                data=final_csv,
+                file_name="final_preprocessing.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            card_close()
 
 
   
@@ -1037,12 +1050,18 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_open()
     st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
 
-    # Buat dataframe evaluasi
+    # Buat dataframe uasi
     eval_df = pd.DataFrame({
         "Ulasan": X_test.values,
         "Label Asli": y_test.values,
         "Prediksi Model": y_pred
     })
+  # ✅ TAMBAH INI (status evaluasi)
+    eval_df["Status"] = np.where(
+        eval_df["Label Asli"] == eval_df["Prediksi Model"],
+        "BENAR",
+        "SALAH"
+    )
 
     wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
     if wrong_df.empty:
