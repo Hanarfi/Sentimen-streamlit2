@@ -1083,7 +1083,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
 
     # Buat dataframe evaluasi
     eval_df = pd.DataFrame({
-        "Ulasan": X_test.values,
+        "content": X_test.values,
         "Label Asli": y_test.values,
         "Prediksi Model": y_pred
     })
@@ -1116,3 +1116,22 @@ elif st.session_state.menu == "Klasifikasi SVM":
         st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
 
     card_close()
+
+    st.markdown("")
+    card_open()
+    st.markdown("## 📦 Download Hasil Klasifikasi SVM")
+    
+    # dataset hasil klasifikasi (khusus data uji / test set)
+    df_svm_dl = eval_df.copy()
+    
+    # optional: tambahkan ringkasan model (akurasi) sebagai kolom konstan kalau mau
+    df_svm_dl["Akurasi_Model"] = round(acc, 6)
+    
+    download_block(
+        title="Berisi data uji (test set): content, label asli, prediksi model, dan skor keyakinan (jika tersedia).",
+        df=df_svm_dl,
+        filename="hasil_klasifikasi_svm_testset.csv"
+    )
+    
+    card_close()
+
