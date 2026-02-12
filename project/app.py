@@ -556,14 +556,14 @@ def show_change_summary_and_examples(step_title: str, before_df: pd.DataFrame, a
 # MENU: HOME
 # =========================
 if st.session_state.menu == "Home":
-    bright_header("💬 Sentimen Analyzer", "Ambil dataset → preprocessing bertahap → klasifikasi SVM (hasil langsung).")
+    bright_header("💬 Analisis Sentimen", "Ambil Dataset → Preprocessing + Labeling → Klasifikasi SVM.")
 
     card_open()
     st.markdown(
         """
 #### Apa yang bisa kamu lakukan?
 - **Dataset**: scraping ulasan Google Play atau upload CSV/Excel.
-- **Preprocessing**: tampil **bertahap** agar mudah dibandingkan.
+- **Preprocessing**: tampil **bertahap** agar mudah dibandingkan .
 - **Klasifikasi SVM**: lihat **confusion matrix, classification report, dan akurasi**.
         """.strip()
     )
@@ -824,7 +824,6 @@ elif st.session_state.menu == "Preprocessing":
                 dist_before_df = st.session_state.get("label_dist_before", None)
             
                 if counts is not None:
-                    st.markdown("#### 📌 Info sebelum filter netral")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("Positif", counts.get("positif", 0))
                     c2.metric("Negatif", counts.get("negatif", 0))
@@ -864,7 +863,7 @@ elif st.session_state.menu == "Preprocessing":
 # MENU: KLASIFIKASI SVM (versi awam-friendly)
 # =========================
 elif st.session_state.menu == "Klasifikasi SVM":
-    bright_header("🧠 Klasifikasi SVM", "Hasil dibuat lebih mudah dipahami untuk orang awam.")
+    bright_header("🧠 Klasifikasi SVM")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
@@ -950,7 +949,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 🔎 Confusion Matrix (versi mudah)")
+    st.markdown("### 🔎 Confusion Matrix")
 
     a, b, c, d = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
     # a: negatif->negatif, b: negatif->positif, c: positif->negatif, d: positif->positif
@@ -1053,7 +1052,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### ⭐ Contoh Prediksi Paling Yakin (agar terasa nyata)")
+    st.markdown("### ⭐ Contoh Prediksi Paling Yakin ")
 
     try:
         scores = model.decision_function(X_test_vec)
