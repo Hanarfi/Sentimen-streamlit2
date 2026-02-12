@@ -979,9 +979,19 @@ elif st.session_state.menu == "Klasifikasi SVM":
     X_train_vec = tfidf.fit_transform(X_train)
     X_test_vec = tfidf.transform(X_test)
 
-    model = LinearSVC()
-    model.fit(X_train_vec, y_train)
-    y_pred = model.predict(X_test_vec)
+    if "svm_model" not in st.session_state:
+        model = LinearSVC()
+        model.fit(X_train_vec, y_train)
+        y_pred = model.predict(X_test_vec)
+    
+        st.session_state.svm_model = model
+        st.session_state.svm_y_pred = y_pred
+        st.session_state.svm_tfidf = tfidf
+    else:
+        model = st.session_state.svm_model
+        y_pred = st.session_state.svm_y_pred
+        tfidf = st.session_state.svm_tfidf
+
 
 
 
