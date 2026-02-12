@@ -1122,7 +1122,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_open()
     st.markdown("### 🔍 Top Kata/Phrase Paling Berpengaruh (Global)")
     
-    top_n = st.slider("Jumlah kata/phrase ditampilkan", 5, 50, 20, 5)
+
     
     top_pos_df, top_neg_df, classes = get_top_terms_global(tfidf, model, top_n=top_n)
     
