@@ -381,6 +381,21 @@ def tokenizing(text: str):
     t = to_text(text).strip()
     return t.split() if t else []
 
+def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")  # utf-8-sig biar aman di Excel
+
+def download_block(title: str, df: pd.DataFrame, filename: str):
+    st.markdown("### ⬇️ Download")
+    st.caption(title)
+    st.download_button(
+        label="📥 Download CSV",
+        data=df_to_csv_bytes(df),
+        file_name=filename,
+        mime="text/csv",
+        use_container_width=True
+    )
+
+
 
 # =========================
 # LABELING (lexicon, aman + fallback)
@@ -787,6 +802,35 @@ elif st.session_state.menu == "Preprocessing":
         st.session_state.final_df = df7.copy()
 
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
+        # setelah preprocessing selesai dan st.session_state.final_df sudah terisi
+        if st.session_state.final_df is not None:
+            st.markdown("")
+            card_open()
+            st.markdown("## 📦 Download Dataset Hasil Preprocessing")
+        
+            text_col = st.session_state.text_col
+            df_dl = st.session_state.final_df.copy()
+        
+            # pastikan kolom yang diminta ada
+            keep_cols = []
+            if text_col in df_dl.columns:
+                keep_cols.append(text_col)  # kolom asli yang dipilih user
+            if "content" in df_dl.columns:
+                keep_cols.append("content")  # hasil preprocessing final (opsional tapi berguna)
+            for c in ["tokens", "score", "Sentimen"]:
+                if c in df_dl.columns:
+                    keep_cols.append(c)
+        
+            df_dl = df_dl[keep_cols].copy()
+        
+            download_block(
+                title="Berisi kolom teks yang dipilih, hasil preprocessing, tokens, score, dan sentimen.",
+                df=df_dl,
+                filename="dataset_preprocessing.csv"
+            )
+        
+            card_close()
+
 
     # tampilkan hasil bertahap (kalau sudah ada)
     steps = st.session_state.prep_steps
@@ -855,20 +899,7 @@ elif st.session_state.menu == "Preprocessing":
             st.session_state.menu = "Klasifikasi SVM"
             st.rerun()
 
-        # ✅ TARUH DOWNLOAD DI SINI (SETELAH tombol lanjut)
-        st.markdown("")
-        if st.session_state.final_df is not None:
-            card_open()
-            st.markdown("### ⬇️ Download Hasil Akhir Preprocessing (CSV)")
-            final_csv = st.session_state.final_df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                label="📥 Download CSV (Final Preprocessing)",
-                data=final_csv,
-                file_name="final_preprocessing.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            card_close()
+
 
 
   
@@ -1050,18 +1081,12 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_open()
     st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
 
-    # Buat dataframe uasi
+    # Buat dataframe evaluasi
     eval_df = pd.DataFrame({
         "Ulasan": X_test.values,
         "Label Asli": y_test.values,
         "Prediksi Model": y_pred
     })
-  # ✅ TAMBAH INI (status evaluasi)
-    eval_df["Status"] = np.where(
-        eval_df["Label Asli"] == eval_df["Prediksi Model"],
-        "BENAR",
-        "SALAH"
-    )
 
     wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
     if wrong_df.empty:
