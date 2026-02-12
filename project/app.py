@@ -862,8 +862,8 @@ elif st.session_state.menu == "Preprocessing":
 # =========================
 # MENU: KLASIFIKASI SVM (versi awam-friendly)
 # =========================
-elif st.session_state.menu == "Klasifikasi SVM":
-    bright_header("🧠 Klasifikasi SVM",)
+elif st.session_state.menu == "Klasifikasi SVM": 
+    bright_header("🧼 Preprocessing", "")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
