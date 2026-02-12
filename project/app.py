@@ -854,6 +854,11 @@ elif st.session_state.menu == "Preprocessing":
         if st.button("➡️ Lanjut ke Klasifikasi SVM", use_container_width=True):
             st.session_state.menu = "Klasifikasi SVM"
             st.rerun()
+
+
+
+
+  
     else:
         st.info("Klik tombol 'Jalankan Preprocessing' untuk memulai.")
 
