@@ -770,22 +770,14 @@ elif st.session_state.menu == "Preprocessing":
             df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
             df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
         
-        # ✅ HITUNG JUMLAH NETRAL SEBELUM FILTER
+        # ✅ SIMPAN distribusi sebelum filter netral
         dist_sebelum = df7["Sentimen"].value_counts()
-        jumlah_netral_sebelum = int(dist_sebelum.get("netral", 0))
-        
-        # ✅ TAMPILKAN JUMLAH NETRAL SEBELUM DIFILTER
-        st.markdown("### 📌 Info sebelum filter netral")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Positif", int(dist_sebelum.get("positif", 0)))
-        c2.metric("Negatif", int(dist_sebelum.get("negatif", 0)))
-        c3.metric("Netral (sebelum filter)", jumlah_netral_sebelum)
-        
-        # (opsional) tampilkan tabel distribusi lengkap sebelum filter
-        st.dataframe(
-            dist_sebelum.rename_axis("Label").reset_index(name="Jumlah"),
-            use_container_width=True
-        )
+        st.session_state.label_dist_before = dist_sebelum.rename_axis("Label").reset_index(name="Jumlah")
+        st.session_state.label_counts_before = {
+            "positif": int(dist_sebelum.get("positif", 0)),
+            "negatif": int(dist_sebelum.get("negatif", 0)),
+            "netral": int(dist_sebelum.get("netral", 0)),
+        }
         
         # ✅ BARU FILTER NETRAL (JIKA DIPILIH)
         if drop_neutral:
@@ -826,15 +818,35 @@ elif st.session_state.menu == "Preprocessing":
                 st.markdown("")
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
-    
-                st.markdown("**Distribusi label:**")
-                dist = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
-                st.dataframe(dist, use_container_width=True)
-    
+            
+                # ✅ INFO SEBELUM FILTER NETRAL (tampilan seperti screenshot)
+                counts = st.session_state.get("label_counts_before", None)
+                dist_before_df = st.session_state.get("label_dist_before", None)
+            
+                if counts is not None:
+                    st.markdown("#### 📌 Info sebelum filter netral")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Positif", counts.get("positif", 0))
+                    c2.metric("Negatif", counts.get("negatif", 0))
+                    c3.metric("Netral (sebelum filter)", counts.get("netral", 0))
+            
+                    if dist_before_df is not None:
+                        st.dataframe(dist_before_df, use_container_width=True)
+                else:
+                    st.info("Info sebelum filter belum tersedia. Jalankan preprocessing dulu.")
+            
+                st.markdown("---")
+            
+                # ✅ Distribusi label SETELAH filter (yang sekarang kamu tampilkan)
+                st.markdown("**Distribusi label (setelah filter):**")
+                dist_after = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
+                st.dataframe(dist_after, use_container_width=True)
+            
                 st.markdown("---")
                 st.markdown("**Contoh hasil pelabelan:**")
                 st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
                 card_close()
+
     
             else:
                 show_compare(keys[i], before, after)
