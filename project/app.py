@@ -437,6 +437,33 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
         lab = "netral"
     return score, lab
 
+# ======================
+# GLOBAL EXPLAINABILITY FUNCTION
+# ======================
+def get_top_terms_global(tfidf_vectorizer, svm_model, top_n: int = 20):
+    feature_names = tfidf_vectorizer.get_feature_names_out()
+
+    if not hasattr(svm_model, "coef_"):
+        return None, None, None
+
+    coef = svm_model.coef_.ravel()
+    classes = list(svm_model.classes_)
+
+    top_pos_idx = np.argsort(coef)[-top_n:][::-1]
+    top_neg_idx = np.argsort(coef)[:top_n]
+
+    top_pos = pd.DataFrame({
+        "Kata/Phrase": feature_names[top_pos_idx],
+        "Bobot": coef[top_pos_idx]
+    })
+
+    top_neg = pd.DataFrame({
+        "Kata/Phrase": feature_names[top_neg_idx],
+        "Bobot": coef[top_neg_idx]
+    })
+
+    return top_pos, top_neg, classes
+
 
 # =========================
 # Sidebar navigation + Reset + Progress (FINAL)
@@ -907,32 +934,7 @@ elif st.session_state.menu == "Preprocessing":
         st.info("Klik tombol 'Jalankan Preprocessing' untuk memulai.")
 
 
-  # ======================
-  # GLOBAL EXPLAINABILITY FUNCTION
-  # ======================
-  def get_top_terms_global(tfidf_vectorizer, svm_model, top_n: int = 20):
-      feature_names = tfidf_vectorizer.get_feature_names_out()
   
-      if not hasattr(svm_model, "coef_"):
-          return None, None, None
-  
-      coef = svm_model.coef_.ravel()
-      classes = list(svm_model.classes_)
-  
-      top_pos_idx = np.argsort(coef)[-top_n:][::-1]
-      top_neg_idx = np.argsort(coef)[:top_n]
-  
-      top_pos = pd.DataFrame({
-          "Kata/Phrase": feature_names[top_pos_idx],
-          "Bobot": coef[top_pos_idx]
-      })
-  
-      top_neg = pd.DataFrame({
-          "Kata/Phrase": feature_names[top_neg_idx],
-          "Bobot": coef[top_neg_idx]
-      })
-  
-      return top_pos, top_neg, classes
 
 # =========================
 # MENU: KLASIFIKASI SVM (versi awam-friendly)
