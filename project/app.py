@@ -907,6 +907,32 @@ elif st.session_state.menu == "Preprocessing":
         st.info("Klik tombol 'Jalankan Preprocessing' untuk memulai.")
 
 
+# ======================
+# GLOBAL EXPLAINABILITY FUNCTION
+# ======================
+def get_top_terms_global(tfidf_vectorizer, svm_model, top_n: int = 20):
+    feature_names = tfidf_vectorizer.get_feature_names_out()
+
+    if not hasattr(svm_model, "coef_"):
+        return None, None, None
+
+    coef = svm_model.coef_.ravel()
+    classes = list(svm_model.classes_)
+
+    top_pos_idx = np.argsort(coef)[-top_n:][::-1]
+    top_neg_idx = np.argsort(coef)[:top_n]
+
+    top_pos = pd.DataFrame({
+        "Kata/Phrase": feature_names[top_pos_idx],
+        "Bobot": coef[top_pos_idx]
+    })
+
+    top_neg = pd.DataFrame({
+        "Kata/Phrase": feature_names[top_neg_idx],
+        "Bobot": coef[top_neg_idx]
+    })
+
+    return top_pos, top_neg, classes
 
 # =========================
 # MENU: KLASIFIKASI SVM (versi awam-friendly)
@@ -954,6 +980,39 @@ elif st.session_state.menu == "Klasifikasi SVM":
     model = LinearSVC()
     model.fit(X_train_vec, y_train)
     y_pred = model.predict(X_test_vec)
+
+    # ======================
+    # TOP KATA GLOBAL
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🔍 Top Kata/Phrase Paling Berpengaruh (Global)")
+    
+    top_n = st.slider("Jumlah kata/phrase ditampilkan", 5, 50, 20, 5)
+    
+    top_pos_df, top_neg_df, classes = get_top_terms_global(tfidf, model, top_n=top_n)
+    
+    if top_pos_df is not None:
+        st.caption(
+            f"Koefisien mengikuti urutan kelas: {classes}. "
+            f"Bobot positif mendorong ke kelas '{classes[1]}', "
+            f"bobot negatif mendorong ke kelas '{classes[0]}'."
+        )
+    
+        c1, c2 = st.columns(2)
+    
+        with c1:
+            st.markdown(f"#### 🟢 Paling mendorong ke '{classes[1]}'")
+            st.dataframe(top_pos_df, use_container_width=True)
+    
+        with c2:
+            st.markdown(f"#### 🔴 Paling mendorong ke '{classes[0]}'")
+            st.dataframe(top_neg_df, use_container_width=True)
+    else:
+        st.info("Model belum memiliki koefisien.")
+    
+    card_close()
+
 
     acc = accuracy_score(y_test, y_pred)
 
