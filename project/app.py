@@ -977,11 +977,14 @@ elif st.session_state.menu == "Preprocessing":
 
 
 # =========================
-# MENU: KLASIFIKASI SVM (awam-friendly + uji model + tambah ke dataset)
+# MENU: KLASIFIKASI SVM (FINAL CLEAN)
 # =========================
 elif st.session_state.menu == "Klasifikasi SVM":
     bright_header("🧠 Klasifikasi SVM", "Hasil mudah dipahami + evaluasi model + uji prediksi ulasan.")
 
+    # -------------------------
+    # Guard: dataset siap?
+    # -------------------------
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
         st.stop()
@@ -995,20 +998,479 @@ elif st.session_state.menu == "Klasifikasi SVM":
     df = df[df["Sentimen"].isin(["positif", "negatif"])].copy()
     df["content"] = df["content"].astype(str).fillna("")
 
-    # --- train button
+    # -------------------------
+    # Helpers (khusus menu ini)
+    # -------------------------
+    def ensure_svm_state():
+        """Pastikan key session_state tersedia."""
+        defaults = {
+            "svm_ready": False,
+            "svm_model": None,
+            "tfidf": None,
+            "svm_acc": None,
+            "svm_y_test": None,
+            "svm_y_pred": None,
+            "svm_X_test": None,
+            "svm_X_test_vec": None,
+            "svm_classes": None,
+            "svm_feature_names": None,
+            "svm_coef": None,
+        }
+        for k, v in defaults.items():
+            if k not in st.session_state:
+                st.session_state[k] = v
+
+    def store_svm_artifacts(model, tfidf, acc, X_test, X_test_vec, y_test, y_pred):
+        st.session_state.svm_ready = True
+        st.session_state.svm_model = model
+        st.session_state.tfidf = tfidf
+        st.session_state.svm_acc = float(acc)
+        st.session_state.svm_X_test = X_test
+        st.session_state.svm_X_test_vec = X_test_vec
+        st.session_state.svm_y_test = y_test
+        st.session_state.svm_y_pred = y_pred
+        st.session_state.svm_classes = list(model.classes_)
+        try:
+            st.session_state.svm_feature_names = tfidf.get_feature_names_out()
+            st.session_state.svm_coef = model.coef_.ravel()
+        except Exception:
+            st.session_state.svm_feature_names = None
+            st.session_state.svm_coef = None
+
+    def load_svm_artifacts():
+        return (
+            st.session_state.svm_model,
+            st.session_state.tfidf,
+            st.session_state.svm_acc,
+            st.session_state.svm_X_test,
+            st.session_state.svm_X_test_vec,
+            st.session_state.svm_y_test,
+            st.session_state.svm_y_pred,
+        )
+
+    def render_summary(acc, y_test, y_pred, cm):
+        total_uji = int(len(y_test))
+        benar = int((np.asarray(y_pred) == np.asarray(y_test)).sum())
+        salah = int(total_uji - benar)
+
+        fp = int(cm[0, 1])  # negatif -> positif
+        fn = int(cm[1, 0])  # positif -> negatif
+
+        card_open()
+        st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
+        st.markdown(
+            f"""
+**Ringkasan:**
+- Dari **{total_uji}** ulasan data uji, model memprediksi dengan benar **{benar}** ulasan.
+- Ada **{salah}** ulasan yang masih salah prediksi.
+- Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
+""".strip()
+        )
+
+        if fp > fn:
+            st.info(f"Kesalahan yang paling sering: **Negatif dikira Positif** ({fp} kasus).")
+        elif fn > fp:
+            st.info(f"Kesalahan yang paling sering: **Positif dikira Negatif** ({fn} kasus).")
+        else:
+            st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
+        card_close()
+
+    def render_pie_charts(y_test, y_pred):
+        card_open()
+        st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi Model)")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### Label Asli (Data Uji)")
+            counts = pd.Series(y_test).value_counts()
+            fig, ax = plt.subplots(figsize=(4.8, 4.2))
+            ax.pie(counts.values, labels=counts.index, autopct="%1.1f%%", startangle=90)
+            ax.set_title("Distribusi Label Asli")
+            st.pyplot(fig)
+
+        with col2:
+            st.markdown("#### Prediksi Model")
+            counts = pd.Series(y_pred).value_counts()
+            fig, ax = plt.subplots(figsize=(4.8, 4.2))
+            ax.pie(counts.values, labels=counts.index, autopct="%1.1f%%", startangle=90)
+            ax.set_title("Distribusi Prediksi Model")
+            st.pyplot(fig)
+
+        st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
+        card_close()
+
+    def top_terms_from_texts(texts: pd.Series, n=10):
+        words = []
+        for t in texts.astype(str).fillna("").tolist():
+            t = stemming(stopword_removal(data_cleansing(case_folding(t))))
+            words.extend([w for w in t.split() if len(w) >= 3])
+        c = Counter(words)
+        return pd.DataFrame(c.most_common(n), columns=["Kata", "Frekuensi"])
+
+    def render_auto_insights(eval_df):
+        card_open()
+        st.markdown("### 💡 Insight Otomatis (Ringkasan Cepat)")
+
+        pred_counts = eval_df["Prediksi Model"].value_counts()
+        p_pos = (pred_counts.get("positif", 0) / len(eval_df)) * 100
+        p_neg = (pred_counts.get("negatif", 0) / len(eval_df)) * 100
+
+        st.markdown(
+            f"""
+**Ringkasan cepat:**
+- Pada data uji, prediksi model menunjukkan sekitar **{p_pos:.1f}%** ulasan cenderung **positif** dan **{p_neg:.1f}%** cenderung **negatif**.
+- Kata yang sering muncul pada prediksi **negatif** biasanya menggambarkan sumber keluhan.
+""".strip()
+        )
+
+        neg_texts = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
+        top_neg = top_terms_from_texts(neg_texts, n=10)
+
+        wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]]
+        top_wrong = top_terms_from_texts(wrong_df["content"], n=10) if not wrong_df.empty else None
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### Kata dominan pada prediksi **NEGATIF**")
+            st.dataframe(top_neg, use_container_width=True)
+
+        with c2:
+            st.markdown("#### Kata dominan pada **salah prediksi** (area sulit)")
+            if wrong_df.empty:
+                st.success("Tidak ada salah prediksi di data uji.")
+            else:
+                st.dataframe(top_wrong, use_container_width=True)
+
+        st.caption("Insight ini ringkas untuk membantu orang awam memahami topik keluhan dan area sulit model.")
+        card_close()
+
+    def render_examples(eval_df):
+        card_open()
+        st.markdown("### 🧾 Contoh Ulasan Positif & Negatif (Hasil Prediksi Model)")
+
+        pos_examples = eval_df[eval_df["Prediksi Model"] == "positif"]["content"].head(6)
+        neg_examples = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"].head(6)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### 🟢 Diprediksi **POSITIF**")
+            st.dataframe(pos_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+        with c2:
+            st.markdown("#### 🔴 Diprediksi **NEGATIF**")
+            st.dataframe(neg_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+
+        st.caption("Contoh ini membantu user awam memahami seperti apa ulasan yang dianggap positif/negatif oleh model.")
+        card_close()
+
+    def render_confusion_matrix(cm, labels):
+        card_open()
+        st.markdown("### 🔎 Confusion Matrix (Plot + Ringkasan)")
+
+        fig, ax = plt.subplots(figsize=(5.2, 4.2))
+        im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
+        ax.figure.colorbar(im, ax=ax)
+
+        ax.set(
+            xticks=np.arange(len(labels)),
+            yticks=np.arange(len(labels)),
+            xticklabels=labels,
+            yticklabels=labels,
+            xlabel="Prediksi Model",
+            ylabel="Label Asli",
+            title="Confusion Matrix"
+        )
+
+        thresh = cm.max() / 2.0 if cm.max() > 0 else 0
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(
+                    j, i, format(cm[i, j], "d"),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black",
+                    fontweight="bold"
+                )
+
+        plt.tight_layout()
+        st.pyplot(fig)
+
+        cm_df = pd.DataFrame(cm, index=[f"Asli {l}" for l in labels], columns=[f"Pred {l}" for l in labels])
+        st.dataframe(cm_df, use_container_width=True)
+
+        total = int(cm.sum())
+        benar_cm = int(np.trace(cm))
+        salah_cm = int(total - benar_cm)
+        acc_cm = (benar_cm / total) if total else 0.0
+
+        tn, fp = int(cm[0, 0]), int(cm[0, 1])
+        fn, tp = int(cm[1, 0]), int(cm[1, 1])
+
+        st.markdown("#### ✅ Ringkasan Confusion Matrix")
+        st.markdown(
+            f"""
+- Total data uji: **{total}**
+- Prediksi benar: **{benar_cm}**
+- Prediksi salah: **{salah_cm}**
+- Akurasi (dari CM): **{acc_cm*100:.2f}%**
+            """.strip()
+        )
+
+        if fp > fn:
+            st.info(f"Kesalahan paling sering: **ulasan negatif dikira positif** (**{fp}** kasus).")
+        elif fn > fp:
+            st.info(f"Kesalahan paling sering: **ulasan positif dikira negatif** (**{fn}** kasus).")
+        else:
+            st.info("Kesalahan negatif→positif dan positif→negatif jumlahnya **seimbang**.")
+
+        st.markdown(
+            f"""
+**Detail:**
+- **TN (Negatif → Negatif)**: {tn}
+- **FP (Negatif → Positif)**: {fp}
+- **FN (Positif → Negatif)**: {fn}
+- **TP (Positif → Positif)**: {tp}
+            """.strip()
+        )
+        st.caption("Catatan: Baris = label asli, kolom = prediksi model.")
+        card_close()
+
+    def render_classification_report(y_test, y_pred):
+        card_open()
+        st.markdown("### 📘 Classification Report")
+
+        with st.expander("Klik untuk lihat penjelasan sederhana mengenai Precision/Recall/F1"):
+            st.markdown(
+                """
+- **Precision (ketepatan)**: Kalau model bilang “positif”, seberapa sering itu benar?
+- **Recall (kelengkapan)**: Dari semua yang benar-benar “positif”, seberapa banyak yang berhasil ditangkap model?
+- **F1-Score**: Nilai ringkasan yang menyeimbangkan precision dan recall.
+- **Support**: Jumlah data (ulasan) pada kelas tersebut.
+                """.strip()
+            )
+
+        rep = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+        rep_df = pd.DataFrame(rep).transpose()
+        st.dataframe(rep_df, use_container_width=True)
+        card_close()
+
+    def render_top_terms_from_model():
+        card_open()
+        st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
+
+        try:
+            feature_names = st.session_state.svm_feature_names
+            coef = st.session_state.svm_coef
+            classes = st.session_state.svm_classes
+            if feature_names is None or coef is None or classes is None:
+                raise ValueError("Feature names/coef/classes belum tersedia.")
+
+            # umumnya classes: ['negatif','positif']
+            pos_idx = np.argsort(coef)[-20:][::-1]
+            neg_idx = np.argsort(coef)[:20]
+
+            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
+            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("#### 🟢 Top Kata Positif")
+                st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
+                st.dataframe(top_pos, use_container_width=True)
+
+            with c2:
+                st.markdown("#### 🔴 Top Kata Negatif")
+                st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
+                st.dataframe(top_neg, use_container_width=True)
+
+            st.markdown("---")
+            st.caption("Download top kata (positif & negatif)")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.download_button(
+                    "📥 Download Top Kata Positif (CSV)",
+                    data=top_pos.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="top_kata_positif_svm.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            with col_b:
+                st.download_button(
+                    "📥 Download Top Kata Negatif (CSV)",
+                    data=top_neg.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="top_kata_negatif_svm.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+        except Exception as e:
+            st.error(f"Gagal membuat top kata: {e}")
+
+        card_close()
+
+    def render_wrong_predictions(eval_df):
+        card_open()
+        st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
+
+        wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
+        if wrong_df.empty:
+            st.success("Tidak ada salah prediksi pada data uji (jarang terjadi, tapi bisa).")
+        else:
+            st.caption("Beberapa contoh yang membuat model keliru (membantu memahami batasan model).")
+            st.dataframe(wrong_df.head(15), use_container_width=True)
+        card_close()
+
+    def render_most_confident(model, X_test_vec, eval_df):
+        card_open()
+        st.markdown("### ⭐ Contoh Prediksi Paling Yakin")
+
+        try:
+            scores = model.decision_function(X_test_vec)
+            eval_conf = eval_df.copy()
+            eval_conf["Skor Keyakinan"] = np.abs(scores)
+            top_conf = eval_conf.sort_values("Skor Keyakinan", ascending=False).head(10)
+
+            st.caption("Semakin besar skor keyakinan, semakin yakin model dengan prediksinya.")
+            st.dataframe(top_conf, use_container_width=True)
+        except Exception:
+            st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
+        card_close()
+
+    def preprocess_for_model(text: str) -> tuple[str, str]:
+        """Return: (raw_text, final_preprocessed_text)"""
+        t0 = to_text(text)
+        t1 = case_folding(t0)
+        t2 = data_cleansing(t1)
+
+        ASSETS_DIR = "assets"
+        KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
+        kamus = load_kamus_excel_safe(KAMUS_PATH) if os.path.exists(KAMUS_PATH) else {}
+        t3 = normalisasi_kamus(t2, kamus) if kamus else t2
+
+        t4 = stopword_removal(t3)
+        t5 = stemming(t4)
+        return t0, t5
+
+    def render_user_test_and_add(model, tfidf):
+        card_open()
+        st.markdown("### 🧪 Pengujian Model (Input Ulasan → Prediksi Sentimen)")
+        st.caption("Model tidak hilang saat klik prediksi karena hasil training disimpan di session_state.")
+
+        with st.form("form_uji_model_final_clean"):
+            user_text = st.text_area(
+                "Masukkan ulasan yang ingin diuji",
+                placeholder="Contoh: aplikasi sering error saat login, tolong diperbaiki...",
+                height=120
+            )
+            c1, c2 = st.columns(2)
+            do_predict = c1.form_submit_button("🔎 Prediksi Sentimen", use_container_width=True)
+            add_to_dataset = c2.form_submit_button("📌 Prediksi + Tambahkan ke Dataset", use_container_width=True)
+
+        if do_predict or add_to_dataset:
+            if not user_text.strip():
+                st.warning("Ulasan tidak boleh kosong.")
+            elif (model is None) or (tfidf is None) or (not st.session_state.svm_ready):
+                st.error("Model belum tersedia. Jalankan 'Mulai Klasifikasi SVM' dulu.")
+            else:
+                t0, t5 = preprocess_for_model(user_text)
+                X_user_vec = tfidf.transform([t5])
+                pred = model.predict(X_user_vec)[0]
+
+                try:
+                    score = float(model.decision_function(X_user_vec)[0])
+                    conf = abs(score)
+                except Exception:
+                    conf = None
+
+                if pred == "positif":
+                    st.success("✅ Prediksi model: **POSITIF**")
+                else:
+                    st.error("❌ Prediksi model: **NEGATIF**")
+
+                st.markdown("#### 🔍 Detail")
+                st.write("**Teks asli:**", t0)
+                st.write("**Setelah preprocessing:**", t5)
+                if conf is not None:
+                    st.caption(f"Skor keyakinan (semakin besar semakin yakin): {conf:.3f}")
+
+                if add_to_dataset:
+                    if st.session_state.final_df is None:
+                        st.error("final_df belum tersedia. Jalankan preprocessing dulu.")
+                    else:
+                        new_row = {
+                            "user_input_raw": t0,
+                            "content": t5,
+                            "tokens": tokenizing(t5),
+                            "score": np.nan,
+                            "Sentimen": pred,
+                            "source": "user_test",
+                            "confidence": float(conf) if conf is not None else np.nan,
+                            "created_at": pd.Timestamp.now(),
+                        }
+                        st.session_state.final_df = pd.concat(
+                            [st.session_state.final_df, pd.DataFrame([new_row])],
+                            ignore_index=True
+                        )
+                        st.success("✅ Ulasan berhasil ditambahkan ke dataset (final_df).")
+                        st.download_button(
+                            "📥 Download dataset terbaru (CSV)",
+                            data=st.session_state.final_df.to_csv(index=False).encode("utf-8-sig"),
+                            file_name="dataset_final_plus_user_input.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+        card_close()
+
+    def render_download_testset(eval_df, acc):
+        card_open()
+        st.markdown("## 📦 Download Hasil Klasifikasi SVM")
+        df_svm_dl = eval_df.copy()
+        df_svm_dl["Akurasi_Model"] = round(float(acc), 6)
+
+        download_block(
+            title="Berisi data uji (test set): content, label asli, prediksi model.",
+            df=df_svm_dl,
+            filename="hasil_klasifikasi_svm_testset.csv"
+        )
+        card_close()
+
+    # -------------------------
+    # Init svm state
+    # -------------------------
+    ensure_svm_state()
+
+    # -------------------------
+    # Train controls
+    # -------------------------
     card_open()
     st.markdown("#### Jalankan SVM (TF-IDF, split 80/20)")
-    train_svm = st.button("🚀 Mulai Klasifikasi SVM", use_container_width=True)
+    colA, colB = st.columns([1, 1])
+    train_svm = colA.button("🚀 Mulai Klasifikasi SVM", use_container_width=True)
+    reset_model = colB.button("🧹 Reset Model", use_container_width=True)
     card_close()
 
-    # gate: kalau belum pernah train dan belum klik train → stop
+    if reset_model:
+        # reset artifacts saja, tidak reset dataset
+        st.session_state.svm_ready = False
+        st.session_state.svm_model = None
+        st.session_state.tfidf = None
+        st.session_state.svm_acc = None
+        st.session_state.svm_y_test = None
+        st.session_state.svm_y_pred = None
+        st.session_state.svm_X_test = None
+        st.session_state.svm_X_test_vec = None
+        st.session_state.svm_classes = None
+        st.session_state.svm_feature_names = None
+        st.session_state.svm_coef = None
+        st.rerun()
+
+    # Gate: jika belum ready dan belum klik train
     if (not st.session_state.svm_ready) and (not train_svm):
-        st.info("Klik tombol di atas untuk melatih model dan melihat hasil.")
+        st.info("Klik tombol **Mulai Klasifikasi SVM** untuk melatih model dan melihat hasil.")
         st.stop()
 
-    # ======================
-    # TRAIN + STORE
-    # ======================
+    # -------------------------
+    # Train (jika diminta)
+    # -------------------------
     if train_svm or (not st.session_state.svm_ready):
         X = df["content"]
         y = df["Sentimen"].astype(str)
@@ -1026,466 +1488,52 @@ elif st.session_state.menu == "Klasifikasi SVM":
         y_pred = model.predict(X_test_vec)
 
         acc = accuracy_score(y_test, y_pred)
+        store_svm_artifacts(model, tfidf, acc, X_test, X_test_vec, y_test, y_pred)
 
-        # simpan agar rerun tombol lain tidak reset hasil
-        st.session_state.svm_model = model
-        st.session_state.tfidf = tfidf
-        st.session_state.svm_ready = True
+    # -------------------------
+    # Load artifacts
+    # -------------------------
+    model, tfidf, acc, X_test, X_test_vec, y_test, y_pred = load_svm_artifacts()
 
-        st.session_state.svm_acc = float(acc)
-        st.session_state.svm_y_test = y_test
-        st.session_state.svm_y_pred = y_pred
-        st.session_state.svm_X_test = X_test
-        st.session_state.svm_X_test_vec = X_test_vec
-
-        st.session_state.svm_classes = list(model.classes_)
-        try:
-            st.session_state.svm_feature_names = tfidf.get_feature_names_out()
-            st.session_state.svm_coef = model.coef_.ravel()
-        except Exception:
-            st.session_state.svm_feature_names = None
-            st.session_state.svm_coef = None
-
-    # ======================
-    # LOAD STORED ARTIFACTS (untuk rerun)
-    # ======================
-    model = st.session_state.svm_model
-    tfidf = st.session_state.tfidf
-    acc = st.session_state.svm_acc
-    y_test = st.session_state.svm_y_test
-    y_pred = st.session_state.svm_y_pred
-    X_test = st.session_state.svm_X_test
-    X_test_vec = st.session_state.svm_X_test_vec
-
-    labels = ["negatif", "positif"]  # urutan tetap agar CM konsisten
+    labels = ["negatif", "positif"]
     cm = confusion_matrix(y_test, y_pred, labels=labels)
 
-    # ======================
-    # AWAM-FRIENDLY: Kesimpulan Sederhana
-    # ======================
-    total_uji = int(len(y_test))
-    benar = int((np.asarray(y_pred) == np.asarray(y_test)).sum())
-    salah = int(total_uji - benar)
-
-    fp = int(cm[0, 1])  # negatif -> positif
-    fn = int(cm[1, 0])  # positif -> negatif
-
-    st.markdown("")
-    card_open()
-    st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
-    st.markdown(
-        f"""
-**Ringkasan:**
-- Dari **{total_uji}** ulasan data uji, model memprediksi dengan benar **{benar}** ulasan.
-- Ada **{salah}** ulasan yang masih salah prediksi.
-- Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
-""".strip()
-    )
-
-    if fp > fn:
-        st.info(f"Kesalahan yang paling sering: **Negatif dikira Positif** ({fp} kasus).")
-    elif fn > fp:
-        st.info(f"Kesalahan yang paling sering: **Positif dikira Negatif** ({fn} kasus).")
-    else:
-        st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
-    card_close()
-
-    # ======================
-    # Pie chart sentimen (Label Asli vs Prediksi)
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi Model)")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### Label Asli (Data Uji)")
-        y_test_counts = pd.Series(y_test).value_counts()
-        fig, ax = plt.subplots(figsize=(4.8, 4.2))
-        ax.pie(y_test_counts.values, labels=y_test_counts.index, autopct="%1.1f%%", startangle=90)
-        ax.set_title("Distribusi Label Asli")
-        st.pyplot(fig)
-
-    with col2:
-        st.markdown("#### Prediksi Model")
-        y_pred_counts = pd.Series(y_pred).value_counts()
-        fig, ax = plt.subplots(figsize=(4.8, 4.2))
-        ax.pie(y_pred_counts.values, labels=y_pred_counts.index, autopct="%1.1f%%", startangle=90)
-        ax.set_title("Distribusi Prediksi Model")
-        st.pyplot(fig)
-
-    st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
-    card_close()
-
-    # ======================
-    # Contoh ulasan positif & negatif (hasil prediksi)
-    # ======================
     eval_df = pd.DataFrame({
         "content": X_test.values,
         "Label Asli": y_test.values,
         "Prediksi Model": y_pred
     })
 
-    st.markdown("")
-    card_open()
-    st.markdown("### 🧾 Contoh Ulasan Positif & Negatif (Hasil Prediksi Model)")
-
-    pos_examples = eval_df[eval_df["Prediksi Model"] == "positif"]["content"].head(6)
-    neg_examples = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"].head(6)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### 🟢 Diprediksi **POSITIF**")
-        st.dataframe(pos_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
-    with c2:
-        st.markdown("#### 🔴 Diprediksi **NEGATIF**")
-        st.dataframe(neg_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
-
-    st.caption("Contoh ini membantu user awam memahami seperti apa ulasan yang dianggap positif/negatif oleh model.")
-    card_close()
-
     # ======================
-    # Insight otomatis
+    # DISPLAY ORDER (lebih natural)
     # ======================
-    def top_terms_from_texts(texts: pd.Series, n=10):
-        words = []
-        for t in texts.astype(str).fillna("").tolist():
-            t = stemming(stopword_removal(data_cleansing(case_folding(t))))
-            words.extend([w for w in t.split() if len(w) >= 3])
-        c = Counter(words)
-        return pd.DataFrame(c.most_common(n), columns=["Kata", "Frekuensi"])
+    render_summary(acc, y_test, y_pred, cm)
+    render_pie_charts(y_test, y_pred)
+    render_auto_insights(eval_df)
+    render_examples(eval_df)
 
-    st.markdown("")
-    card_open()
-    st.markdown("### 💡 Insight Otomatis (Ringkasan Cepat)")
+    render_confusion_matrix(cm, labels)
+    render_classification_report(y_test, y_pred)
+    render_top_terms_from_model()
 
-    neg_texts = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
-    top_neg = top_terms_from_texts(neg_texts, n=10)
+    render_wrong_predictions(eval_df)
+    render_most_confident(model, X_test_vec, eval_df)
 
-    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]]
-    top_wrong = top_terms_from_texts(wrong_df["content"], n=10) if not wrong_df.empty else pd.DataFrame(columns=["Kata", "Frekuensi"])
+    render_user_test_and_add(model, tfidf)
+    render_download_testset(eval_df, acc)
+    # # ======================
+    # # Download hasil klasifikasi (test set)
+    # # ======================
+    # st.markdown("")
+    # card_open()
+    # st.markdown("## 📦 Download Hasil Klasifikasi SVM")
 
-    p_pos = (pd.Series(y_pred).value_counts().get("positif", 0) / len(y_pred)) * 100
-    p_neg = (pd.Series(y_pred).value_counts().get("negatif", 0) / len(y_pred)) * 100
+    # df_svm_dl = eval_df.copy()
+    # df_svm_dl["Akurasi_Model"] = round(float(acc), 6)
 
-    st.markdown(
-        f"""
-**Ringkasan cepat:**
-- Pada data uji, prediksi model menunjukkan sekitar **{p_pos:.1f}%** ulasan cenderung **positif** dan **{p_neg:.1f}%** cenderung **negatif**.
-- Kata yang sering muncul pada prediksi **negatif** biasanya menggambarkan sumber keluhan.
-""".strip()
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### Kata dominan pada prediksi **NEGATIF**")
-        st.dataframe(top_neg, use_container_width=True)
-    with c2:
-        st.markdown("#### Kata dominan pada **salah prediksi** (area sulit)")
-        if wrong_df.empty:
-            st.success("Tidak ada salah prediksi di data uji.")
-        else:
-            st.dataframe(top_wrong, use_container_width=True)
-
-    st.caption("Insight ini bersifat ringkas dan membantu orang awam memahami topik keluhan dan area yang sulit untuk model.")
-    card_close()
-
-    # ======================
-    # Confusion Matrix (plot + ringkasan)
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 🔎 Confusion Matrix (Plot + Ringkasan)")
-
-    fig, ax = plt.subplots(figsize=(5.2, 4.2))
-    im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
-    ax.figure.colorbar(im, ax=ax)
-
-    ax.set(
-        xticks=np.arange(len(labels)),
-        yticks=np.arange(len(labels)),
-        xticklabels=labels,
-        yticklabels=labels,
-        xlabel="Prediksi Model",
-        ylabel="Label Asli",
-        title="Confusion Matrix"
-    )
-
-    thresh = cm.max() / 2.0 if cm.max() > 0 else 0
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            ax.text(
-                j, i, format(cm[i, j], "d"),
-                ha="center", va="center",
-                color="white" if cm[i, j] > thresh else "black",
-                fontweight="bold"
-            )
-
-    plt.tight_layout()
-    st.pyplot(fig)
-
-    cm_df = pd.DataFrame(cm, index=[f"Asli {l}" for l in labels], columns=[f"Pred {l}" for l in labels])
-    st.dataframe(cm_df, use_container_width=True)
-
-    total = int(cm.sum())
-    benar_cm = int(np.trace(cm))
-    salah_cm = int(total - benar_cm)
-    acc_cm = (benar_cm / total) if total else 0.0
-
-    tn, fp2 = int(cm[0, 0]), int(cm[0, 1])
-    fn2, tp = int(cm[1, 0]), int(cm[1, 1])
-
-    st.markdown("#### ✅ Ringkasan Confusion Matrix")
-    st.markdown(
-        f"""
-- Total data uji: **{total}**
-- Prediksi benar: **{benar_cm}**
-- Prediksi salah: **{salah_cm}**
-- Akurasi (dari CM): **{acc_cm*100:.2f}%**
-        """.strip()
-    )
-
-    if fp2 > fn2:
-        st.info(f"Kesalahan paling sering: **ulasan negatif dikira positif** (**{fp2}** kasus).")
-    elif fn2 > fp2:
-        st.info(f"Kesalahan paling sering: **ulasan positif dikira negatif** (**{fn2}** kasus).")
-    else:
-        st.info("Kesalahan negatif→positif dan positif→negatif jumlahnya **seimbang**.")
-
-    st.markdown(
-        f"""
-**Detail:**
-- **TN (Negatif → Negatif)**: {tn}
-- **FP (Negatif → Positif)**: {fp2}
-- **FN (Positif → Negatif)**: {fn2}
-- **TP (Positif → Positif)**: {tp}
-        """.strip()
-    )
-
-    st.caption("Catatan: Baris = label asli, kolom = prediksi model.")
-    card_close()
-
-    # ======================
-    # Classification report
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 📘 Classification Report")
-
-    with st.expander("Klik untuk lihat penjelasan sederhana mengenai Precision/Recall/F1"):
-        st.markdown(
-            """
-- **Precision (ketepatan)**: Kalau model bilang “positif”, seberapa sering itu benar?
-- **Recall (kelengkapan)**: Dari semua yang benar-benar “positif”, seberapa banyak yang berhasil ditangkap model?
-- **F1-Score**: Nilai ringkasan yang menyeimbangkan precision dan recall.
-- **Support**: Jumlah data (ulasan) pada kelas tersebut.
-            """.strip()
-        )
-
-    rep = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-    rep_df = pd.DataFrame(rep).transpose()
-    st.dataframe(rep_df, use_container_width=True)
-    card_close()
-
-    # ======================
-    # Top kata positif/negatif dari bobot LinearSVC
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
-
-    try:
-        feature_names = st.session_state.svm_feature_names
-        coef = st.session_state.svm_coef
-        classes = st.session_state.svm_classes
-
-        if feature_names is None or coef is None or classes is None:
-            raise ValueError("Feature names/coef/classes belum tersedia.")
-
-        # classes biasanya ['negatif','positif']
-        if len(classes) == 2 and classes[1] == "positif":
-            pos_idx = np.argsort(coef)[-20:][::-1]
-            neg_idx = np.argsort(coef)[:20]
-        else:
-            pos_idx = np.argsort(coef)[-20:][::-1]
-            neg_idx = np.argsort(coef)[:20]
-
-        top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
-        top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### 🟢 Top Kata Positif")
-            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
-            st.dataframe(top_pos, use_container_width=True)
-
-        with c2:
-            st.markdown("#### 🔴 Top Kata Negatif")
-            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
-            st.dataframe(top_neg, use_container_width=True)
-
-        st.markdown("---")
-        st.caption("Download top kata (positif & negatif)")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.download_button(
-                "📥 Download Top Kata Positif (CSV)",
-                data=top_pos.to_csv(index=False).encode("utf-8-sig"),
-                file_name="top_kata_positif_svm.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        with col_b:
-            st.download_button(
-                "📥 Download Top Kata Negatif (CSV)",
-                data=top_neg.to_csv(index=False).encode("utf-8-sig"),
-                file_name="top_kata_negatif_svm.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-    except Exception as e:
-        st.error(f"Gagal membuat top kata: {e}")
-
-    card_close()
-
-    # ======================
-    # Contoh salah prediksi
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
-
-    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
-    if wrong_df.empty:
-        st.success("Tidak ada salah prediksi pada data uji (jarang terjadi, tapi bisa).")
-    else:
-        st.caption("Berikut beberapa contoh yang membuat model keliru (ini membantu orang awam memahami batasan model).")
-        st.dataframe(wrong_df.head(15), use_container_width=True)
-    card_close()
-
-    # ======================
-    # Contoh paling “yakin”
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### ⭐ Contoh Prediksi Paling Yakin")
-
-    try:
-        scores = model.decision_function(X_test_vec)
-        eval_conf = eval_df.copy()
-        eval_conf["Skor Keyakinan"] = np.abs(scores)
-        top_conf = eval_conf.sort_values("Skor Keyakinan", ascending=False).head(10)
-
-        st.caption("Semakin besar skor keyakinan, semakin yakin model dengan prediksinya.")
-        st.dataframe(top_conf, use_container_width=True)
-    except Exception:
-        st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
-
-    card_close()
-
-    # ======================
-    # Pengujian model + tambah ke dataset
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 🧪 Pengujian Model (Input Ulasan → Prediksi Sentimen)")
-    st.caption("Model tidak akan hilang saat klik prediksi, karena hasil training disimpan di session_state.")
-
-    with st.form("form_uji_model"):
-        user_text = st.text_area(
-            "Masukkan ulasan yang ingin diuji",
-            placeholder="Contoh: aplikasi sering error saat login, tolong diperbaiki...",
-            height=120
-        )
-        c1, c2 = st.columns(2)
-        do_predict = c1.form_submit_button("🔎 Prediksi Sentimen", use_container_width=True)
-        add_to_dataset = c2.form_submit_button("📌 Prediksi + Tambahkan ke Dataset", use_container_width=True)
-
-    def preprocess_for_model(text: str) -> tuple[str, str]:
-        """Return: (raw_text, final_preprocessed_text)"""
-        t0 = to_text(text)
-        t1 = case_folding(t0)
-        t2 = data_cleansing(t1)
-
-        ASSETS_DIR = "assets"
-        KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
-        kamus = load_kamus_excel_safe(KAMUS_PATH) if os.path.exists(KAMUS_PATH) else {}
-        t3 = normalisasi_kamus(t2, kamus) if kamus else t2
-
-        t4 = stopword_removal(t3)
-        t5 = stemming(t4)
-        return t0, t5
-
-    if do_predict or add_to_dataset:
-        if not user_text.strip():
-            st.warning("Ulasan tidak boleh kosong.")
-        elif (model is None) or (tfidf is None) or (not st.session_state.svm_ready):
-            st.error("Model belum tersedia. Jalankan 'Mulai Klasifikasi SVM' dulu.")
-        else:
-            t0, t5 = preprocess_for_model(user_text)
-            X_user_vec = tfidf.transform([t5])
-            pred = model.predict(X_user_vec)[0]
-
-            try:
-                score = float(model.decision_function(X_user_vec)[0])
-                conf = abs(score)
-            except Exception:
-                conf = None
-
-            if pred == "positif":
-                st.success("✅ Prediksi model: **POSITIF**")
-            else:
-                st.error("❌ Prediksi model: **NEGATIF**")
-
-            st.markdown("#### 🔍 Detail")
-            st.write("**Teks asli:**", t0)
-            st.write("**Setelah preprocessing:**", t5)
-            if conf is not None:
-                st.caption(f"Skor keyakinan (semakin besar semakin yakin): {conf:.3f}")
-
-            if add_to_dataset:
-                if st.session_state.final_df is None:
-                    st.error("final_df belum tersedia. Jalankan preprocessing dulu.")
-                else:
-                    new_row = {
-                        "user_input_raw": t0,                 # tambahan kolom baru
-                        "content": t5,                        # teks hasil preprocessing (dipakai model)
-                        "tokens": tokenizing(t5),
-                        "score": np.nan,                      # bukan lexicon score
-                        "Sentimen": pred,                     # label dari prediksi model
-                        "source": "user_test",
-                        "confidence": float(conf) if conf is not None else np.nan,
-                        "created_at": pd.Timestamp.now(),
-                    }
-                    st.session_state.final_df = pd.concat(
-                        [st.session_state.final_df, pd.DataFrame([new_row])],
-                        ignore_index=True
-                    )
-                    st.success("✅ Ulasan berhasil ditambahkan ke dataset (final_df).")
-
-                    st.download_button(
-                        "📥 Download dataset terbaru (CSV)",
-                        data=st.session_state.final_df.to_csv(index=False).encode("utf-8-sig"),
-                        file_name="dataset_final_plus_user_input.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-    card_close()
-
-    # ======================
-    # Download hasil klasifikasi (test set)
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("## 📦 Download Hasil Klasifikasi SVM")
-
-    df_svm_dl = eval_df.copy()
-    df_svm_dl["Akurasi_Model"] = round(float(acc), 6)
-
-    download_block(
-        title="Berisi data uji (test set): content, label asli, prediksi model.",
-        df=df_svm_dl,
-        filename="hasil_klasifikasi_svm_testset.csv"
-    )
-    card_close()
+    # download_block(
+    #     title="Berisi data uji (test set): content, label asli, prediksi model.",
+    #     df=df_svm_dl,
+    #     filename="hasil_klasifikasi_svm_testset.csv"
+    # )
+    # card_close()
