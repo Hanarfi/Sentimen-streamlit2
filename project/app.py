@@ -1029,25 +1029,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
         
         card_close()
   
-    # ======================
-    # NARASI AWAM
-    # ======================
-    total = cm.sum()
-    benar = int(cm[0, 0] + cm[1, 1])
-    salah = int(cm[0, 1] + cm[1, 0])
-
-    salah_neg_jadi_pos = int(cm[0, 1])
-    salah_pos_jadi_neg = int(cm[1, 0])
-
-    # kalimat kesimpulan
-    kesimpulan = f"Model benar menebak **{benar} dari {total}** ulasan (≈ **{acc*100:.1f}%**)."
-    if salah_neg_jadi_pos > salah_pos_jadi_neg:
-        kesimpulan2 = f"Kesalahan yang paling sering: **ulasan negatif dikira positif** ({salah_neg_jadi_pos} kasus)."
-    elif salah_pos_jadi_neg > salah_neg_jadi_pos:
-        kesimpulan2 = f"Kesalahan yang paling sering: **ulasan positif dikira negatif** ({salah_pos_jadi_neg} kasus)."
-    else:
-        kesimpulan2 = f"Kesalahan negatif→positif dan positif→negatif jumlahnya mirip."
-
+    
 
     # ======================
     # CONFUSION MATRIX (plot umum + ringkasan)
