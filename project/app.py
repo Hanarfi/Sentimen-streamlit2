@@ -912,7 +912,7 @@ elif st.session_state.menu == "Preprocessing":
 # MENU: KLASIFIKASI SVM (versi awam-friendly)
 # =========================
 elif st.session_state.menu == "Klasifikasi SVM": 
-    bright_header("🧼 Preprocessing", "")
+    bright_header("🧼 Klasifikasi SVM", "Lihat hasil model + uji prediksi dengan input ulasan", "")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
@@ -957,9 +957,46 @@ elif st.session_state.menu == "Klasifikasi SVM":
 
     acc = accuracy_score(y_test, y_pred)
 
+    # ✅ simpan model + vectorizer supaya bisa dipakai untuk pengujian input user (tanpa retrain)
+    st.session_state.svm_model = model
+    st.session_state.tfidf = tfidf
+
     labels = ["negatif", "positif"]  # urutan tetap agar CM konsisten
     cm = confusion_matrix(y_test, y_pred, labels=labels)
 
+
+    st.markdown("")
+    card_open()
+    st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
+    
+    total_uji = len(y_test)
+    benar = int((y_pred == y_test).sum())
+    salah = int(total_uji - benar)
+    
+    st.markdown(
+        f"""
+    **Ringkasan:**
+    - Dari **{total_uji}** ulasan data uji, model memprediksi dengan benar **{benar}** ulasan.
+    - Ada **{salah}** ulasan yang masih salah prediksi.
+    - Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
+    """.strip()
+    )
+    
+    # label error dominan (pakai cm yang sudah kamu buat)
+    labels = ["negatif", "positif"]
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+    fp = int(cm[0, 1])  # negatif dikira positif
+    fn = int(cm[1, 0])  # positif dikira negatif
+    
+    if fp > fn:
+        st.info(f"Kesalahan yang paling sering terjadi: **Negatif dikira Positif** ({fp} kasus).")
+    elif fn > fp:
+        st.info(f"Kesalahan yang paling sering terjadi: **Positif dikira Negatif** ({fn} kasus).")
+    else:
+        st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
+    
+    card_close()
+  
     # ======================
     # NARASI AWAM
     # ======================
