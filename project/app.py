@@ -1,6 +1,10 @@
 import os
 import re
 import csv
+import html
+import difflib
+from collections import Counter
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -58,7 +62,6 @@ CSS = """
   padding: 0.75rem 1rem !important;
   font-weight: 800 !important;
 }
-
 
 /* ===== Sidebar nav modern ===== */
 .nav-wrap {
@@ -130,7 +133,7 @@ section[data-testid="stSidebar"] .stButton > button {
 }
 
 /* teks di sidebar sedikit diperkecil */
-section[data-testid="stSidebar"] .stMarkdown, 
+section[data-testid="stSidebar"] .stMarkdown,
 section[data-testid="stSidebar"] p,
 section[data-testid="stSidebar"] label {
   font-size: 0.92rem !important;
@@ -242,7 +245,8 @@ def card_close():
 
 def bright_header(title: str, subtitle: str):
     st.markdown(f"<p class='title-grad'>{title}</p>", unsafe_allow_html=True)
-    st.markdown(f"<p class='subtle'>{subtitle}</p>", unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f"<p class='subtle'>{subtitle}</p>", unsafe_allow_html=True)
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
 
@@ -261,8 +265,62 @@ def init_state():
     if "final_df" not in st.session_state:
         st.session_state.final_df = None
 
+    # --- SVM artifacts / flags (biar tidak balik ke state awal saat rerun)
+    if "svm_ready" not in st.session_state:
+        st.session_state.svm_ready = False
+    if "svm_model" not in st.session_state:
+        st.session_state.svm_model = None
+    if "tfidf" not in st.session_state:
+        st.session_state.tfidf = None
+    if "svm_acc" not in st.session_state:
+        st.session_state.svm_acc = None
+    if "svm_y_test" not in st.session_state:
+        st.session_state.svm_y_test = None
+    if "svm_y_pred" not in st.session_state:
+        st.session_state.svm_y_pred = None
+    if "svm_X_test" not in st.session_state:
+        st.session_state.svm_X_test = None
+    if "svm_X_test_vec" not in st.session_state:
+        st.session_state.svm_X_test_vec = None
+    if "svm_classes" not in st.session_state:
+        st.session_state.svm_classes = None
+    if "svm_feature_names" not in st.session_state:
+        st.session_state.svm_feature_names = None
+    if "svm_coef" not in st.session_state:
+        st.session_state.svm_coef = None
+
+    # label dist sebelum filter netral
+    if "label_dist_before" not in st.session_state:
+        st.session_state.label_dist_before = None
+    if "label_counts_before" not in st.session_state:
+        st.session_state.label_counts_before = None
+
 
 init_state()
+
+
+def reset_all_state():
+    st.session_state.raw_df = None
+    st.session_state.text_col = None
+    st.session_state.prep_steps = {}
+    st.session_state.final_df = None
+    st.session_state.menu = "Home"
+
+    # reset SVM artifacts
+    st.session_state.svm_ready = False
+    st.session_state.svm_model = None
+    st.session_state.tfidf = None
+    st.session_state.svm_acc = None
+    st.session_state.svm_y_test = None
+    st.session_state.svm_y_pred = None
+    st.session_state.svm_X_test = None
+    st.session_state.svm_X_test_vec = None
+    st.session_state.svm_classes = None
+    st.session_state.svm_feature_names = None
+    st.session_state.svm_coef = None
+
+    st.session_state.label_dist_before = None
+    st.session_state.label_counts_before = None
 
 
 # =========================
@@ -324,7 +382,7 @@ def scrape_google_play(app_id: str, jumlah: int, bahasa="id", negara="id"):
 
 
 # =========================
-# PREPROCESSING PIPELINE (aman)
+# PREPROCESSING PIPELINE
 # =========================
 def case_folding(text: str) -> str:
     return to_text(text).lower()
@@ -333,11 +391,9 @@ def case_folding(text: str) -> str:
 def load_kamus_excel_safe(path: str) -> dict:
     try:
         df = pd.read_excel(path)
-        # kolom yang umum
         if "non_standard" in df.columns and "standard_word" in df.columns:
             df = df[["non_standard", "standard_word"]].dropna()
             return dict(zip(df["non_standard"].astype(str), df["standard_word"].astype(str)))
-        # fallback: kalau format beda, coba ambil 2 kolom pertama
         if df.shape[1] >= 2:
             df2 = df.iloc[:, :2].dropna()
             return dict(zip(df2.iloc[:, 0].astype(str), df2.iloc[:, 1].astype(str)))
@@ -381,8 +437,10 @@ def tokenizing(text: str):
     t = to_text(text).strip()
     return t.split() if t else []
 
+
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8-sig")  # utf-8-sig biar aman di Excel
+    return df.to_csv(index=False).encode("utf-8-sig")
+
 
 def download_block(title: str, df: pd.DataFrame, filename: str):
     st.markdown("### ⬇️ Download")
@@ -396,9 +454,8 @@ def download_block(title: str, df: pd.DataFrame, filename: str):
     )
 
 
-
 # =========================
-# LABELING (lexicon, aman + fallback)
+# LABELING (lexicon)
 # =========================
 def load_lexicon_safe(path: str) -> dict:
     lex = {}
@@ -439,10 +496,78 @@ def label_by_lexicon(tokens, lex_pos: dict, lex_neg: dict):
 
 
 # =========================
-# Sidebar navigation + Reset + Progress (FINAL)
+# Diff helper (preprocessing compare)
+# =========================
+def compute_changes(before_series: pd.Series, after_series: pd.Series, max_examples: int = 6):
+    b = before_series.astype(str).fillna("")
+    a = after_series.astype(str).fillna("")
+    changed_mask = b.ne(a)
+    changed_count = int(changed_mask.sum())
+    total = int(len(b))
+
+    examples = pd.DataFrame({
+        "Sebelum": b[changed_mask].head(max_examples).values,
+        "Sesudah": a[changed_mask].head(max_examples).values,
+    })
+    return changed_count, total, examples
+
+
+def diff_words_html(before_text: str, after_text: str) -> tuple[str, str]:
+    b_tokens = to_text(before_text).split()
+    a_tokens = to_text(after_text).split()
+
+    sm = difflib.SequenceMatcher(a=b_tokens, b=a_tokens)
+    b_out, a_out = [], []
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        b_chunk = [html.escape(t) for t in b_tokens[i1:i2]]
+        a_chunk = [html.escape(t) for t in a_tokens[j1:j2]]
+
+        if tag == "equal":
+            b_out.extend(b_chunk)
+            a_out.extend(a_chunk)
+        elif tag == "delete":
+            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
+        elif tag == "insert":
+            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
+        elif tag == "replace":
+            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
+            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
+
+    return " ".join(b_out), " ".join(a_out)
+
+
+def show_change_summary_and_examples(step_title: str, before_df: pd.DataFrame, after_df: pd.DataFrame, col: str = "content"):
+    changed_count, total, examples = compute_changes(before_df[col], after_df[col], max_examples=6)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total baris", total)
+    c2.metric("Baris berubah", changed_count)
+    pct = (changed_count / total * 100) if total else 0
+    c3.metric("Persentase berubah", f"{pct:.2f}%")
+
+    if changed_count == 0:
+        st.info("Tidak ada perubahan pada tahap ini.")
+        return
+
+    st.markdown("**Contoh perubahan (kata ditambah hijau, kata dihapus merah):**")
+    for _, row in examples.iterrows():
+        b_html, a_html = diff_words_html(row["Sebelum"], row["Sesudah"])
+        st.markdown(
+            f"""
+<div class="diff-box">
+  <div class="diff-before"><span class="diff-tag">Sebelum:</span>{b_html}</div>
+  <div class="diff-after"><span class="diff-tag">Sesudah:</span>{a_html}</div>
+</div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+# =========================
+# Sidebar navigation + Reset + Progress
 # =========================
 with st.sidebar:
-    # ===== NAV =====
     st.markdown("### 🧭 Navigasi")
 
     def nav_button(label: str, menu_name: str, icon: str):
@@ -468,7 +593,6 @@ with st.sidebar:
     nav_button("Klasifikasi SVM", "Klasifikasi SVM", "🧠")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ===== PROGRESS (ringkas) =====
     st.markdown("---")
     step = 0
     if st.session_state.raw_df is not None:
@@ -480,106 +604,25 @@ with st.sidebar:
     st.progress(step / 2)
     st.caption(f"{step}/2 (Dataset → Preprocessing)")
 
-    # ===== RESET (ringkas) =====
     if st.button("🔄 Reset", use_container_width=True, key="reset_sidebar_btn"):
-        st.session_state.raw_df = None
-        st.session_state.text_col = None
-        st.session_state.prep_steps = {}
-        st.session_state.final_df = None
-        st.session_state.menu = "Home"
+        reset_all_state()
         st.rerun()
 
-
-import html
-import difflib
-
-def compute_changes(before_series: pd.Series, after_series: pd.Series, max_examples: int = 6):
-    b = before_series.astype(str).fillna("")
-    a = after_series.astype(str).fillna("")
-    changed_mask = b.ne(a)
-    changed_count = int(changed_mask.sum())
-    total = int(len(b))
-
-    examples = pd.DataFrame({
-        "Sebelum": b[changed_mask].head(max_examples).values,
-        "Sesudah": a[changed_mask].head(max_examples).values,
-    })
-    return changed_count, total, examples
-
-
-def diff_words_html(before_text: str, after_text: str) -> tuple[str, str]:
-    """
-    Highlight perbedaan kata:
-    - kata yang dihapus: merah + strikethrough
-    - kata yang ditambah: hijau
-    Return HTML untuk before dan after.
-    """
-    b_tokens = to_text(before_text).split()
-    a_tokens = to_text(after_text).split()
-
-    sm = difflib.SequenceMatcher(a=b_tokens, b=a_tokens)
-    b_out, a_out = [], []
-
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        b_chunk = [html.escape(t) for t in b_tokens[i1:i2]]
-        a_chunk = [html.escape(t) for t in a_tokens[j1:j2]]
-
-        if tag == "equal":
-            b_out.extend(b_chunk)
-            a_out.extend(a_chunk)
-        elif tag == "delete":
-            # hanya ada di before
-            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
-        elif tag == "insert":
-            # hanya ada di after
-            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
-        elif tag == "replace":
-            b_out.extend([f"<span class='diff-del'>{t}</span>" for t in b_chunk])
-            a_out.extend([f"<span class='diff-add'>{t}</span>" for t in a_chunk])
-
-    return " ".join(b_out), " ".join(a_out)
-
-
-def show_change_summary_and_examples(step_title: str, before_df: pd.DataFrame, after_df: pd.DataFrame, col: str = "content"):
-    changed_count, total, examples = compute_changes(before_df[col], after_df[col], max_examples=6)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total baris", total)
-    c2.metric("Baris berubah", changed_count)
-    pct = (changed_count / total * 100) if total else 0
-    c3.metric("Persentase berubah", f"{pct:.2f}%")
-
-    if changed_count == 0:
-        st.info("Tidak ada perubahan pada tahap ini.")
-        return
-
-    st.markdown("**Contoh perubahan (kata ditambah hijau, kata dihapus merah):**")
-
-    for idx, row in examples.iterrows():
-        b_html, a_html = diff_words_html(row["Sebelum"], row["Sesudah"])
-        st.markdown(
-            f"""
-<div class="diff-box">
-  <div class="diff-before"><span class="diff-tag">Sebelum:</span>{b_html}</div>
-  <div class="diff-after"><span class="diff-tag">Sesudah:</span>{a_html}</div>
-</div>
-            """,
-            unsafe_allow_html=True
-        )
 
 # =========================
 # MENU: HOME
 # =========================
 if st.session_state.menu == "Home":
-    bright_header("💬 Analisis Sentimen", "Ambil Dataset → Preprocessing + Labeling → Klasifikasi SVM.")
+    bright_header("💬 Analisis Sentimen", "Ambil Dataset → Preprocessing + Labeling → Klasifikasi SVM + Uji Model.")
 
     card_open()
     st.markdown(
         """
 #### Apa yang bisa kamu lakukan?
 - **Dataset**: scraping ulasan Google Play atau upload CSV/Excel.
-- **Preprocessing**: tampil **bertahap** agar mudah dibandingkan .
-- **Klasifikasi SVM**: lihat **confusion matrix, classification report, dan akurasi**.
+- **Preprocessing**: tampil **bertahap** agar mudah dibandingkan.
+- **Klasifikasi SVM**: hasil awam-friendly (kesimpulan, pie chart, contoh, insight) + evaluasi (CM, report).
+- **Uji Model**: input ulasan manual → prediksi → (opsional) tambahkan ke dataset.
         """.strip()
     )
     card_close()
@@ -619,6 +662,20 @@ elif st.session_state.menu == "Dataset":
             st.session_state.text_col = None
             st.session_state.prep_steps = {}
             st.session_state.final_df = None
+
+            # reset svm artifacts juga karena dataset berubah
+            st.session_state.svm_ready = False
+            st.session_state.svm_model = None
+            st.session_state.tfidf = None
+            st.session_state.svm_acc = None
+            st.session_state.svm_y_test = None
+            st.session_state.svm_y_pred = None
+            st.session_state.svm_X_test = None
+            st.session_state.svm_X_test_vec = None
+            st.session_state.svm_classes = None
+            st.session_state.svm_feature_names = None
+            st.session_state.svm_coef = None
+
             st.rerun()
 
         if do_scrape:
@@ -634,6 +691,20 @@ elif st.session_state.menu == "Dataset":
                     st.session_state.text_col = "content" if "content" in df.columns else df.columns[0]
                     st.session_state.prep_steps = {}
                     st.session_state.final_df = None
+
+                    # reset svm artifacts karena dataset berubah
+                    st.session_state.svm_ready = False
+                    st.session_state.svm_model = None
+                    st.session_state.tfidf = None
+                    st.session_state.svm_acc = None
+                    st.session_state.svm_y_test = None
+                    st.session_state.svm_y_pred = None
+                    st.session_state.svm_X_test = None
+                    st.session_state.svm_X_test_vec = None
+                    st.session_state.svm_classes = None
+                    st.session_state.svm_feature_names = None
+                    st.session_state.svm_coef = None
+
                     st.success(f"Berhasil mengambil {len(df)} ulasan.")
         card_close()
 
@@ -651,6 +722,20 @@ elif st.session_state.menu == "Dataset":
                 st.session_state.text_col = "content" if "content" in cols else cols[0]
                 st.session_state.prep_steps = {}
                 st.session_state.final_df = None
+
+                # reset svm artifacts karena dataset berubah
+                st.session_state.svm_ready = False
+                st.session_state.svm_model = None
+                st.session_state.tfidf = None
+                st.session_state.svm_acc = None
+                st.session_state.svm_y_test = None
+                st.session_state.svm_y_pred = None
+                st.session_state.svm_X_test = None
+                st.session_state.svm_X_test_vec = None
+                st.session_state.svm_classes = None
+                st.session_state.svm_feature_names = None
+                st.session_state.svm_coef = None
+
                 st.success(f"Dataset berhasil di-load: {len(df)} baris.")
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
@@ -677,15 +762,9 @@ elif st.session_state.menu == "Dataset":
         st.info("Silakan scraping atau upload dataset dulu.")
 
 
-
-
-
-
 # =========================
 # MENU: PREPROCESSING
 # =========================
-
-
 elif st.session_state.menu == "Preprocessing":
     bright_header("🧼 Preprocessing", "Klik tombol, lalu hasil tiap langkah akan muncul untuk dibandingkan.")
 
@@ -695,13 +774,11 @@ elif st.session_state.menu == "Preprocessing":
 
     ensure_nltk()
 
-    # otomatis, tanpa input path
     ASSETS_DIR = "assets"
     KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
     LEX_POS_PATH = os.path.join(ASSETS_DIR, "positive.csv")
     LEX_NEG_PATH = os.path.join(ASSETS_DIR, "negative.csv")
 
-    # status file (tanpa text_input)
     card_open()
     st.markdown("#### File pendukung (otomatis)")
     ok_kamus = os.path.exists(KAMUS_PATH)
@@ -713,17 +790,14 @@ elif st.session_state.menu == "Preprocessing":
     card_close()
 
     drop_neutral = st.checkbox("Hapus data netral (score=0)", value=True)
-
     run_prep = st.button("⚙️ Jalankan Preprocessing", use_container_width=True)
 
     def show_compare(title, before_df, after_df, n=15):
         st.markdown("")
         card_open()
         st.markdown(f"### {title}")
-    
-        # ✅ Ringkasan + highlight contoh perubahan
         show_change_summary_and_examples(title, before_df, after_df, col="content")
-    
+
         st.markdown("---")
         c1, c2 = st.columns(2)
         with c1:
@@ -734,27 +808,25 @@ elif st.session_state.menu == "Preprocessing":
             st.dataframe(after_df[["content"]].head(n), use_container_width=True)
         card_close()
 
-
     if run_prep:
         base = st.session_state.raw_df.copy()
         text_col = st.session_state.text_col
 
         df0 = base.copy()
         df0["content"] = df0[text_col].apply(to_text)
-
         st.session_state.prep_steps = {}
         st.session_state.final_df = None
+
         st.session_state.prep_steps["0) Data Awal"] = df0.copy()
 
         df1 = df0.copy()
         df1["content"] = df1["content"].apply(case_folding)
         st.session_state.prep_steps["1) Case Folding"] = df1.copy()
 
-        kamus = load_kamus_excel_safe(KAMUS_PATH) if ok_kamus else {}
         df2 = df1.copy()
         df2["content"] = df2["content"].apply(data_cleansing)
         st.session_state.prep_steps["2) Data Cleansing"] = df2.copy()
-        
+
         kamus = load_kamus_excel_safe(KAMUS_PATH) if ok_kamus else {}
         df3 = df2.copy()
         df3["content"] = df3["content"].apply(lambda x: normalisasi_kamus(x, kamus))
@@ -781,11 +853,9 @@ elif st.session_state.menu == "Preprocessing":
             df7["score"] = res.apply(lambda x: x[0])
             df7["Sentimen"] = res.apply(lambda x: x[1])
         else:
-            # fallback aman
             df7["score"] = df7["tokens"].apply(lambda t: 1 if len(t) >= 5 else (-1 if 0 < len(t) < 3 else 0))
             df7["Sentimen"] = df7["score"].apply(lambda s: "positif" if s > 0 else ("negatif" if s < 0 else "netral"))
-        
-        # ✅ SIMPAN distribusi sebelum filter netral
+
         dist_sebelum = df7["Sentimen"].value_counts()
         st.session_state.label_dist_before = dist_sebelum.rename_axis("Label").reset_index(name="Jumlah")
         st.session_state.label_counts_before = {
@@ -793,61 +863,69 @@ elif st.session_state.menu == "Preprocessing":
             "negatif": int(dist_sebelum.get("negatif", 0)),
             "netral": int(dist_sebelum.get("netral", 0)),
         }
-        
-        # ✅ BARU FILTER NETRAL (JIKA DIPILIH)
+
         if drop_neutral:
             df7 = df7[df7["Sentimen"] != "netral"].reset_index(drop=True)
-        
+
         st.session_state.prep_steps["7) Pelabelan"] = df7.copy()
         st.session_state.final_df = df7.copy()
 
+        # reset svm artifacts karena dataset final berubah
+        st.session_state.svm_ready = False
+        st.session_state.svm_model = None
+        st.session_state.tfidf = None
+        st.session_state.svm_acc = None
+        st.session_state.svm_y_test = None
+        st.session_state.svm_y_pred = None
+        st.session_state.svm_X_test = None
+        st.session_state.svm_X_test_vec = None
+        st.session_state.svm_classes = None
+        st.session_state.svm_feature_names = None
+        st.session_state.svm_coef = None
+
         st.success("Preprocessing selesai! Scroll untuk melihat perbandingan.")
-        # setelah preprocessing selesai dan st.session_state.final_df sudah terisi
+
+        # download hasil preprocessing
         if st.session_state.final_df is not None:
             st.markdown("")
             card_open()
             st.markdown("## 📦 Download Dataset Hasil Preprocessing")
-        
-            text_col = st.session_state.text_col
+
             df_dl = st.session_state.final_df.copy()
-        
-            # pastikan kolom yang diminta ada
             keep_cols = []
             if text_col in df_dl.columns:
-                keep_cols.append(text_col)  # kolom asli yang dipilih user
+                keep_cols.append(text_col)
             if "content" in df_dl.columns:
-                keep_cols.append("content")  # hasil preprocessing final (opsional tapi berguna)
+                keep_cols.append("content")
             for c in ["tokens", "score", "Sentimen"]:
                 if c in df_dl.columns:
                     keep_cols.append(c)
-        
+
             df_dl = df_dl[keep_cols].copy()
-        
+
             download_block(
                 title="Berisi kolom teks yang dipilih, hasil preprocessing, tokens, score, dan sentimen.",
                 df=df_dl,
                 filename="dataset_preprocessing.csv"
             )
-        
+
             card_close()
 
-
-    # tampilkan hasil bertahap (kalau sudah ada)
     steps = st.session_state.prep_steps
     if steps:
         keys = list(steps.keys())
         for i in range(1, len(keys)):
             before = steps[keys[i - 1]]
             after = steps[keys[i]]
-    
+
             if keys[i].startswith("6) Tokenizing"):
                 st.markdown("")
                 card_open()
                 st.markdown("### 6) Tokenizing")
-    
+
                 st.markdown("**Contoh hasil token (teks → tokens):**")
                 st.dataframe(after[["content", "tokens"]].head(12), use_container_width=True)
-    
+
                 st.markdown("---")
                 c1, c2 = st.columns(2)
                 with c1:
@@ -857,62 +935,52 @@ elif st.session_state.menu == "Preprocessing":
                     st.markdown("**Sesudah (tokens)**")
                     st.dataframe(after[["content", "tokens"]].head(15), use_container_width=True)
                 card_close()
-    
+
             elif keys[i].startswith("7) Pelabelan"):
                 st.markdown("")
                 card_open()
                 st.markdown("### 7) Pelabelan Sentimen")
-            
-                # ✅ INFO SEBELUM FILTER NETRAL (tampilan seperti screenshot)
+
                 counts = st.session_state.get("label_counts_before", None)
                 dist_before_df = st.session_state.get("label_dist_before", None)
-            
+
                 if counts is not None:
                     c1, c2, c3 = st.columns(3)
                     c1.metric("Positif", counts.get("positif", 0))
                     c2.metric("Negatif", counts.get("negatif", 0))
                     c3.metric("Netral (sebelum filter)", counts.get("netral", 0))
-            
+
                     if dist_before_df is not None:
                         st.dataframe(dist_before_df, use_container_width=True)
                 else:
                     st.info("Info sebelum filter belum tersedia. Jalankan preprocessing dulu.")
-            
+
                 st.markdown("---")
-            
-                # ✅ Distribusi label SETELAH filter (yang sekarang kamu tampilkan)
+
                 st.markdown("**Distribusi label (setelah filter):**")
                 dist_after = after["Sentimen"].value_counts().rename_axis("Label").reset_index(name="Jumlah")
                 st.dataframe(dist_after, use_container_width=True)
-            
+
                 st.markdown("---")
                 st.markdown("**Contoh hasil pelabelan:**")
                 st.dataframe(after[["content", "tokens", "score", "Sentimen"]].head(25), use_container_width=True)
                 card_close()
-
-    
             else:
                 show_compare(keys[i], before, after)
-    
+
         st.markdown("")
         if st.button("➡️ Lanjut ke Klasifikasi SVM", use_container_width=True):
             st.session_state.menu = "Klasifikasi SVM"
             st.rerun()
-
-
-
-
-  
     else:
         st.info("Klik tombol 'Jalankan Preprocessing' untuk memulai.")
 
 
-
 # =========================
-# MENU: KLASIFIKASI SVM (versi awam-friendly)
+# MENU: KLASIFIKASI SVM (awam-friendly + uji model + tambah ke dataset)
 # =========================
-elif st.session_state.menu == "Klasifikasi SVM": 
-    bright_header("🧼 Klasifikasi SVM", "Lihat hasil model + uji prediksi dengan input ulasan")
+elif st.session_state.menu == "Klasifikasi SVM":
+    bright_header("🧠 Klasifikasi SVM", "Hasil mudah dipahami + evaluasi model + uji prediksi ulasan.")
 
     if st.session_state.final_df is None:
         st.warning("Data belum siap. Jalankan preprocessing dulu.")
@@ -927,73 +995,109 @@ elif st.session_state.menu == "Klasifikasi SVM":
     df = df[df["Sentimen"].isin(["positif", "negatif"])].copy()
     df["content"] = df["content"].astype(str).fillna("")
 
+    # --- train button
     card_open()
     st.markdown("#### Jalankan SVM (TF-IDF, split 80/20)")
-    run_svm = st.button("🚀 Mulai Klasifikasi SVM", use_container_width=True)
+    train_svm = st.button("🚀 Mulai Klasifikasi SVM", use_container_width=True)
     card_close()
 
-    if not run_svm:
-        st.info("Klik tombol di atas untuk melihat hasil model.")
+    # gate: kalau belum pernah train dan belum klik train → stop
+    if (not st.session_state.svm_ready) and (not train_svm):
+        st.info("Klik tombol di atas untuk melatih model dan melihat hasil.")
         st.stop()
 
     # ======================
-    # TRAIN + PREDICT
+    # TRAIN + STORE
     # ======================
-    X = df["content"]
-    y = df["Sentimen"].astype(str)
+    if train_svm or (not st.session_state.svm_ready):
+        X = df["content"]
+        y = df["Sentimen"].astype(str)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42,
-        stratify=y
-    )
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
 
-    tfidf = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
-    X_train_vec = tfidf.fit_transform(X_train)
-    X_test_vec = tfidf.transform(X_test)
+        tfidf = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
+        X_train_vec = tfidf.fit_transform(X_train)
+        X_test_vec = tfidf.transform(X_test)
 
-    model = LinearSVC()
-    model.fit(X_train_vec, y_train)
-    y_pred = model.predict(X_test_vec)
+        model = LinearSVC()
+        model.fit(X_train_vec, y_train)
+        y_pred = model.predict(X_test_vec)
 
-    acc = accuracy_score(y_test, y_pred)
+        acc = accuracy_score(y_test, y_pred)
 
-    # ✅ simpan model + vectorizer supaya bisa dipakai untuk pengujian input user (tanpa retrain)
-    st.session_state.svm_model = model
-    st.session_state.tfidf = tfidf
+        # simpan agar rerun tombol lain tidak reset hasil
+        st.session_state.svm_model = model
+        st.session_state.tfidf = tfidf
+        st.session_state.svm_ready = True
+
+        st.session_state.svm_acc = float(acc)
+        st.session_state.svm_y_test = y_test
+        st.session_state.svm_y_pred = y_pred
+        st.session_state.svm_X_test = X_test
+        st.session_state.svm_X_test_vec = X_test_vec
+
+        st.session_state.svm_classes = list(model.classes_)
+        try:
+            st.session_state.svm_feature_names = tfidf.get_feature_names_out()
+            st.session_state.svm_coef = model.coef_.ravel()
+        except Exception:
+            st.session_state.svm_feature_names = None
+            st.session_state.svm_coef = None
+
+    # ======================
+    # LOAD STORED ARTIFACTS (untuk rerun)
+    # ======================
+    model = st.session_state.svm_model
+    tfidf = st.session_state.tfidf
+    acc = st.session_state.svm_acc
+    y_test = st.session_state.svm_y_test
+    y_pred = st.session_state.svm_y_pred
+    X_test = st.session_state.svm_X_test
+    X_test_vec = st.session_state.svm_X_test_vec
 
     labels = ["negatif", "positif"]  # urutan tetap agar CM konsisten
     cm = confusion_matrix(y_test, y_pred, labels=labels)
 
     # ======================
-    # Ringkasan Hasil
+    # AWAM-FRIENDLY: Kesimpulan Sederhana
     # ======================
+    total_uji = int(len(y_test))
+    benar = int((pd.Series(y_pred) == pd.Series(y_test)).sum())
+    salah = int(total_uji - benar)
+
+    fp = int(cm[0, 1])  # negatif -> positif
+    fn = int(cm[1, 0])  # positif -> negatif
+
     st.markdown("")
     card_open()
-    st.markdown("### ✅ Ringkasan Hasil")
-    
-    total_uji = len(y_test)
-    benar = int((y_pred == y_test).sum())
-    salah = int(total_uji - benar)
-    
+    st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
     st.markdown(
         f"""
-    **Ringkasan:**
-    - Dari **{total_uji}** ulasan data uji,  memprediksi dengan benar **{benar}** ulasan.
-    - Ada **{salah}** ulasan yang masih salah prediksi.
-    - Akurasi : **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
-    """.strip()
+**Ringkasan:**
+- Dari **{total_uji}** ulasan data uji, model memprediksi dengan benar **{benar}** ulasan.
+- Ada **{salah}** ulasan yang masih salah prediksi.
+- Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
+""".strip()
     )
 
+    if fp > fn:
+        st.info(f"Kesalahan yang paling sering: **Negatif dikira Positif** ({fp} kasus).")
+    elif fn > fp:
+        st.info(f"Kesalahan yang paling sering: **Positif dikira Negatif** ({fn} kasus).")
+    else:
+        st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
+    card_close()
+
     # ======================
-    # Pie Chart
+    # Pie chart sentimen (Label Asli vs Prediksi)
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi )")
-    
+    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi Model)")
+
     col1, col2 = st.columns(2)
-    
-    # label asli (y_test)
     with col1:
         st.markdown("#### Label Asli (Data Uji)")
         y_test_counts = pd.Series(y_test).value_counts()
@@ -1001,8 +1105,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
         ax.pie(y_test_counts.values, labels=y_test_counts.index, autopct="%1.1f%%", startangle=90)
         ax.set_title("Distribusi Label Asli")
         st.pyplot(fig)
-    
-    # prediksi model (y_pred)
+
     with col2:
         st.markdown("#### Prediksi Model")
         y_pred_counts = pd.Series(y_pred).value_counts()
@@ -1010,28 +1113,94 @@ elif st.session_state.menu == "Klasifikasi SVM":
         ax.pie(y_pred_counts.values, labels=y_pred_counts.index, autopct="%1.1f%%", startangle=90)
         ax.set_title("Distribusi Prediksi Model")
         st.pyplot(fig)
-    
+
     st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
     card_close()
-        
-  
-    
 
     # ======================
-    # CONFUSION MATRIX (plot umum + ringkasan)
+    # Contoh ulasan positif & negatif (hasil prediksi)
+    # ======================
+    eval_df = pd.DataFrame({
+        "content": X_test.values,
+        "Label Asli": y_test.values,
+        "Prediksi Model": y_pred
+    })
+
+    st.markdown("")
+    card_open()
+    st.markdown("### 🧾 Contoh Ulasan Positif & Negatif (Hasil Prediksi Model)")
+
+    pos_examples = eval_df[eval_df["Prediksi Model"] == "positif"]["content"].head(6)
+    neg_examples = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"].head(6)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### 🟢 Diprediksi **POSITIF**")
+        st.dataframe(pos_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+    with c2:
+        st.markdown("#### 🔴 Diprediksi **NEGATIF**")
+        st.dataframe(neg_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+
+    st.caption("Contoh ini membantu user awam memahami seperti apa ulasan yang dianggap positif/negatif oleh model.")
+    card_close()
+
+    # ======================
+    # Insight otomatis
+    # ======================
+    def top_terms_from_texts(texts: pd.Series, n=10):
+        words = []
+        for t in texts.astype(str).fillna("").tolist():
+            t = stemming(stopword_removal(data_cleansing(case_folding(t))))
+            words.extend([w for w in t.split() if len(w) >= 3])
+        c = Counter(words)
+        return pd.DataFrame(c.most_common(n), columns=["Kata", "Frekuensi"])
+
+    st.markdown("")
+    card_open()
+    st.markdown("### 💡 Insight Otomatis (Ringkasan Cepat)")
+
+    neg_texts = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
+    top_neg = top_terms_from_texts(neg_texts, n=10)
+
+    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]]
+    top_wrong = top_terms_from_texts(wrong_df["content"], n=10) if not wrong_df.empty else pd.DataFrame(columns=["Kata", "Frekuensi"])
+
+    p_pos = (pd.Series(y_pred).value_counts().get("positif", 0) / len(y_pred)) * 100
+    p_neg = (pd.Series(y_pred).value_counts().get("negatif", 0) / len(y_pred)) * 100
+
+    st.markdown(
+        f"""
+**Ringkasan cepat:**
+- Pada data uji, prediksi model menunjukkan sekitar **{p_pos:.1f}%** ulasan cenderung **positif** dan **{p_neg:.1f}%** cenderung **negatif**.
+- Kata yang sering muncul pada prediksi **negatif** biasanya menggambarkan sumber keluhan.
+""".strip()
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Kata dominan pada prediksi **NEGATIF**")
+        st.dataframe(top_neg, use_container_width=True)
+    with c2:
+        st.markdown("#### Kata dominan pada **salah prediksi** (area sulit)")
+        if wrong_df.empty:
+            st.success("Tidak ada salah prediksi di data uji.")
+        else:
+            st.dataframe(top_wrong, use_container_width=True)
+
+    st.caption("Insight ini bersifat ringkas dan membantu orang awam memahami topik keluhan dan area yang sulit untuk model.")
+    card_close()
+
+    # ======================
+    # Confusion Matrix (plot + ringkasan)
     # ======================
     st.markdown("")
     card_open()
     st.markdown("### 🔎 Confusion Matrix (Plot + Ringkasan)")
-    
-    labels = ["negatif", "positif"]  # pastikan konsisten
-    cm = confusion_matrix(y_test, y_pred, labels=labels)
-    
-    # ---- Plot CM (matplotlib) ----
+
     fig, ax = plt.subplots(figsize=(5.2, 4.2))
     im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
     ax.figure.colorbar(im, ax=ax)
-    
+
     ax.set(
         xticks=np.arange(len(labels)),
         yticks=np.arange(len(labels)),
@@ -1041,8 +1210,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
         ylabel="Label Asli",
         title="Confusion Matrix"
     )
-    
-    # tampilkan angka di tiap kotak
+
     thresh = cm.max() / 2.0 if cm.max() > 0 else 0
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
@@ -1052,59 +1220,53 @@ elif st.session_state.menu == "Klasifikasi SVM":
                 color="white" if cm[i, j] > thresh else "black",
                 fontweight="bold"
             )
-    
+
     plt.tight_layout()
     st.pyplot(fig)
-    
-    # ---- Tabel CM (opsional tapi membantu) ----
+
     cm_df = pd.DataFrame(cm, index=[f"Asli {l}" for l in labels], columns=[f"Pred {l}" for l in labels])
     st.dataframe(cm_df, use_container_width=True)
-    
-    # ---- Ringkasan CM (narasi) ----
+
     total = int(cm.sum())
-    benar = int(np.trace(cm))
-    salah = int(total - benar)
-    acc_cm = (benar / total) if total else 0.0
-    
-    # untuk binary dengan urutan labels = ["negatif","positif"]
-    tn, fp = int(cm[0, 0]), int(cm[0, 1])  # negatif benar, negatif salah jadi positif
-    fn, tp = int(cm[1, 0]), int(cm[1, 1])  # positif salah jadi negatif, positif benar
-    
+    benar_cm = int(np.trace(cm))
+    salah_cm = int(total - benar_cm)
+    acc_cm = (benar_cm / total) if total else 0.0
+
+    tn, fp2 = int(cm[0, 0]), int(cm[0, 1])
+    fn2, tp = int(cm[1, 0]), int(cm[1, 1])
+
     st.markdown("#### ✅ Ringkasan Confusion Matrix")
     st.markdown(
         f"""
-    - Total data uji: **{total}**
-    - Prediksi benar: **{benar}**
-    - Prediksi salah: **{salah}**
-    - Akurasi (dari CM): **{acc_cm*100:.2f}%**
-    """.strip()
+- Total data uji: **{total}**
+- Prediksi benar: **{benar_cm}**
+- Prediksi salah: **{salah_cm}**
+- Akurasi (dari CM): **{acc_cm*100:.2f}%**
+        """.strip()
     )
-    
-    # jelaskan salah prediksi yang dominan
-    if fp > fn:
-        st.info(f"Kesalahan paling sering: **ulasan negatif dikira positif** (**{fp}** kasus).")
-    elif fn > fp:
-        st.info(f"Kesalahan paling sering: **ulasan positif dikira negatif** (**{fn}** kasus).")
+
+    if fp2 > fn2:
+        st.info(f"Kesalahan paling sering: **ulasan negatif dikira positif** (**{fp2}** kasus).")
+    elif fn2 > fp2:
+        st.info(f"Kesalahan paling sering: **ulasan positif dikira negatif** (**{fn2}** kasus).")
     else:
         st.info("Kesalahan negatif→positif dan positif→negatif jumlahnya **seimbang**.")
-    
-    # ringkasan 4 komponen (lebih 'umum' juga)
+
     st.markdown(
         f"""
-    **Detail:**
-    - **TN (Negatif → Negatif)**: {tn}
-    - **FP (Negatif → Positif)**: {fp}
-    - **FN (Positif → Negatif)**: {fn}
-    - **TP (Positif → Positif)**: {tp}
-    """.strip()
+**Detail:**
+- **TN (Negatif → Negatif)**: {tn}
+- **FP (Negatif → Positif)**: {fp2}
+- **FN (Positif → Negatif)**: {fn2}
+- **TP (Positif → Positif)**: {tp}
+        """.strip()
     )
-    
+
     st.caption("Catatan: Baris = label asli, kolom = prediksi model.")
     card_close()
 
-
     # ======================
-    # PENJELASAN METRIK (awam-friendly)
+    # Classification report
     # ======================
     st.markdown("")
     card_open()
@@ -1126,84 +1288,42 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
-    # Contoh Ulasan Positif dan Negatif
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 🧾 Contoh Ulasan Positif & Negatif (Hasil Prediksi Model)")
-    
-    eval_df = pd.DataFrame({
-        "content": X_test.values,
-        "Label Asli": y_test.values,
-        "Prediksi Model": y_pred
-    })
-    
-    pos_examples = eval_df[eval_df["Prediksi Model"] == "positif"]["content"].head(6)
-    neg_examples = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"].head(6)
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### 🟢 Contoh yang diprediksi **POSITIF**")
-        st.dataframe(pos_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
-    
-    with c2:
-        st.markdown("#### 🔴 Contoh yang diprediksi **NEGATIF**")
-        st.dataframe(neg_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
-    
-    st.caption("Contoh ini membantu user awam memahami seperti apa ulasan yang dianggap positif/negatif oleh model.")
-    card_close()
-
-    # ======================
-    # TOP KATA POSITIF/NEGATIF (berdasarkan bobot LinearSVC)
+    # Top kata positif/negatif dari bobot LinearSVC
     # ======================
     st.markdown("")
     card_open()
     st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
-    
+
     try:
-        feature_names = tfidf.get_feature_names_out()
-    
-        # LinearSVC binary: coef_.shape = (1, n_features)
-        # Tanda koefisien menunjukkan arah ke kelas tertentu.
-        # Kita cek kelas mana yang dianggap "positif" oleh model.
-        # classes_ berurutan alfabet: biasanya ['negatif','positif']
-        coef = model.coef_.ravel()
-    
-        # Jika kelas ke-1 adalah 'positif', koef positif = condong ke 'positif'
-        # Kalau tidak, balik interpretasinya.
-        # (Umumnya aman karena classes_ biasanya ['negatif','positif'])
-        classes = list(model.classes_)
+        feature_names = st.session_state.svm_feature_names
+        coef = st.session_state.svm_coef
+        classes = st.session_state.svm_classes
+
+        if feature_names is None or coef is None or classes is None:
+            raise ValueError("Feature names/coef/classes belum tersedia.")
+
+        # classes biasanya ['negatif','positif']
         if len(classes) == 2 and classes[1] == "positif":
-            pos_idx = np.argsort(coef)[-20:][::-1]   # top 20 bobot terbesar
-            neg_idx = np.argsort(coef)[:20]          # top 20 bobot terkecil
-            top_pos = pd.DataFrame({
-                "Kata/Ngram": feature_names[pos_idx],
-                "Bobot": coef[pos_idx]
-            })
-            top_neg = pd.DataFrame({
-                "Kata/Ngram": feature_names[neg_idx],
-                "Bobot": coef[neg_idx]
-            })
-        else:
-            # fallback kalau urutan kelas berbeda
-            # anggap bobot positif condong ke classes[1] (apa pun isinya)
             pos_idx = np.argsort(coef)[-20:][::-1]
             neg_idx = np.argsort(coef)[:20]
-            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
-            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
-    
+        else:
+            pos_idx = np.argsort(coef)[-20:][::-1]
+            neg_idx = np.argsort(coef)[:20]
+
+        top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
+        top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
+
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("#### 🟢 Top Kata Positif")
             st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
             st.dataframe(top_pos, use_container_width=True)
-    
+
         with c2:
             st.markdown("#### 🔴 Top Kata Negatif")
             st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
             st.dataframe(top_neg, use_container_width=True)
-    
-        # Optional download
+
         st.markdown("---")
         st.caption("Download top kata (positif & negatif)")
         col_a, col_b = st.columns(2)
@@ -1223,26 +1343,18 @@ elif st.session_state.menu == "Klasifikasi SVM":
                 mime="text/csv",
                 use_container_width=True
             )
-    
+
     except Exception as e:
         st.error(f"Gagal membuat top kata: {e}")
-    
+
     card_close()
 
-
     # ======================
-    # CONTOH SALAH PREDIKSI (paling penting untuk awam)
+    # Contoh salah prediksi
     # ======================
     st.markdown("")
     card_open()
     st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
-
-    # Buat dataframe evaluasi
-    eval_df = pd.DataFrame({
-        "content": X_test.values,
-        "Label Asli": y_test.values,
-        "Prediksi Model": y_pred
-    })
 
     wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]].copy()
     if wrong_df.empty:
@@ -1253,19 +1365,18 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
-    # CONTOH PALING “YAKIN” (pakai decision_function)
+    # Contoh paling “yakin”
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### ⭐ Contoh Prediksi Paling Yakin ")
+    st.markdown("### ⭐ Contoh Prediksi Paling Yakin")
 
     try:
         scores = model.decision_function(X_test_vec)
-        # Binary: score > 0 biasanya ke kelas "positif" tergantung urutan training
-        # Kita tetap pakai skor absolut untuk confidence
-        eval_df["Skor Keyakinan"] = np.abs(scores)
+        eval_conf = eval_df.copy()
+        eval_conf["Skor Keyakinan"] = np.abs(scores)
+        top_conf = eval_conf.sort_values("Skor Keyakinan", ascending=False).head(10)
 
-        top_conf = eval_df.sort_values("Skor Keyakinan", ascending=False).head(10)
         st.caption("Semakin besar skor keyakinan, semakin yakin model dengan prediksinya.")
         st.dataframe(top_conf, use_container_width=True)
     except Exception:
@@ -1274,138 +1385,107 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
-    # Insight Otomatis
+    # Pengujian model + tambah ke dataset
     # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### 💡 Insight Otomatis (Ringkasan Cepat)")
-    
-    # fungsi bantu ambil kata dominan dari teks
-    def top_terms(texts: pd.Series, n=10):
-        from collections import Counter
-        words = []
-        for t in texts.astype(str).fillna("").tolist():
-            # pakai preprocessing yang sama agar konsisten
-            t = stemming(stopword_removal(data_cleansing(case_folding(t))))
-            words.extend([w for w in t.split() if len(w) >= 3])
-        c = Counter(words)
-        return pd.DataFrame(c.most_common(n), columns=["Kata", "Frekuensi"])
-    
-    # 1) dominan pada prediksi negatif
-    neg_texts = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
-    top_neg = top_terms(neg_texts, n=10)
-    
-    # 2) dominan pada yang salah prediksi (area sulit)
-    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]]
-    top_wrong = top_terms(wrong_df["content"], n=10) if not wrong_df.empty else pd.DataFrame(columns=["Kata","Frekuensi"])
-    
-    # narasi singkat
-    p_pos = (pd.Series(y_pred).value_counts().get("positif", 0) / len(y_pred)) * 100
-    p_neg = (pd.Series(y_pred).value_counts().get("negatif", 0) / len(y_pred)) * 100
-    
-    st.markdown(
-        f"""
-    **Ringkasan cepat:**
-    - Prediksi model menunjukkan sekitar **{p_pos:.1f}%** ulasan cenderung **positif** dan **{p_neg:.1f}%** cenderung **negatif** pada data uji.
-    - Kata yang sering muncul pada prediksi **negatif** biasanya menggambarkan sumber keluhan.
-    """.strip()
-    )
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("#### Kata dominan pada prediksi **NEGATIF**")
-        st.dataframe(top_neg, use_container_width=True)
-    
-    with c2:
-        st.markdown("#### Kata dominan pada **salah prediksi** (area sulit)")
-        if wrong_df.empty:
-            st.success("Tidak ada salah prediksi di data uji.")
-        else:
-            st.dataframe(top_wrong, use_container_width=True)
-    
-    st.caption("Insight ini bersifat ringkas dan membantu orang awam memahami topik keluhan dan area yang sulit untuk model.")
-    card_close()
-
-    # ======================
-    # Pengujian Model
-    # ======================
-
     st.markdown("")
     card_open()
     st.markdown("### 🧪 Pengujian Model (Input Ulasan → Prediksi Sentimen)")
-    
-    user_text = st.text_area(
-        "Masukkan ulasan yang ingin diuji",
-        placeholder="Contoh: aplikasi sering error saat login, tolong diperbaiki...",
-        height=120
-    )
-    
-    do_predict = st.button("🔎 Prediksi Sentimen", use_container_width=True)
-    
-    if do_predict:
+    st.caption("Model tidak akan hilang saat klik prediksi, karena hasil training disimpan di session_state.")
+
+    with st.form("form_uji_model"):
+        user_text = st.text_area(
+            "Masukkan ulasan yang ingin diuji",
+            placeholder="Contoh: aplikasi sering error saat login, tolong diperbaiki...",
+            height=120
+        )
+        c1, c2 = st.columns(2)
+        do_predict = c1.form_submit_button("🔎 Prediksi Sentimen", use_container_width=True)
+        add_to_dataset = c2.form_submit_button("📌 Prediksi + Tambahkan ke Dataset", use_container_width=True)
+
+    def preprocess_for_model(text: str) -> tuple[str, str]:
+        """Return: (raw_text, final_preprocessed_text)"""
+        t0 = to_text(text)
+        t1 = case_folding(t0)
+        t2 = data_cleansing(t1)
+
+        ASSETS_DIR = "assets"
+        KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
+        kamus = load_kamus_excel_safe(KAMUS_PATH) if os.path.exists(KAMUS_PATH) else {}
+        t3 = normalisasi_kamus(t2, kamus) if kamus else t2
+
+        t4 = stopword_removal(t3)
+        t5 = stemming(t4)
+        return t0, t5
+
+    if do_predict or add_to_dataset:
         if not user_text.strip():
             st.warning("Ulasan tidak boleh kosong.")
+        elif (model is None) or (tfidf is None) or (not st.session_state.svm_ready):
+            st.error("Model belum tersedia. Jalankan 'Mulai Klasifikasi SVM' dulu.")
         else:
-            model = st.session_state.get("svm_model", None)
-            tfidf = st.session_state.get("tfidf", None)
-    
-            if model is None or tfidf is None:
-                st.error("Model belum tersedia. Jalankan 'Mulai Klasifikasi SVM' dulu.")
+            t0, t5 = preprocess_for_model(user_text)
+            X_user_vec = tfidf.transform([t5])
+            pred = model.predict(X_user_vec)[0]
+
+            try:
+                score = float(model.decision_function(X_user_vec)[0])
+                conf = abs(score)
+            except Exception:
+                conf = None
+
+            if pred == "positif":
+                st.success("✅ Prediksi model: **POSITIF**")
             else:
-                # preprocessing sama seperti training
-                t0 = to_text(user_text)
-                t1 = case_folding(t0)
-                t2 = data_cleansing(t1)
-    
-                # normalisasi (opsional) jika kamus tersedia
-                ASSETS_DIR = "assets"
-                KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
-                kamus = load_kamus_excel_safe(KAMUS_PATH) if os.path.exists(KAMUS_PATH) else {}
-                t3 = normalisasi_kamus(t2, kamus) if kamus else t2
-    
-                t4 = stopword_removal(t3)
-                t5 = stemming(t4)
-    
-                X_user_vec = tfidf.transform([t5])
-                pred = model.predict(X_user_vec)[0]
-    
-                # confidence sederhana
-                try:
-                    score = float(model.decision_function(X_user_vec)[0])
-                    conf = abs(score)
-                except Exception:
-                    conf = None
-    
-                if pred == "positif":
-                    st.success("✅ Prediksi model: **POSITIF**")
+                st.error("❌ Prediksi model: **NEGATIF**")
+
+            st.markdown("#### 🔍 Detail")
+            st.write("**Teks asli:**", t0)
+            st.write("**Setelah preprocessing:**", t5)
+            if conf is not None:
+                st.caption(f"Skor keyakinan (semakin besar semakin yakin): {conf:.3f}")
+
+            if add_to_dataset:
+                if st.session_state.final_df is None:
+                    st.error("final_df belum tersedia. Jalankan preprocessing dulu.")
                 else:
-                    st.error("❌ Prediksi model: **NEGATIF**")
-    
-                st.markdown("#### 🔍 Detail")
-                st.write("**Teks asli:**", t0)
-                st.write("**Setelah preprocessing:**", t5)
-                if conf is not None:
-                    st.caption(f"Skor keyakinan (semakin besar semakin yakin): {conf:.3f}")
-    
+                    new_row = {
+                        "user_input_raw": t0,                 # tambahan kolom baru
+                        "content": t5,                        # teks hasil preprocessing (dipakai model)
+                        "tokens": tokenizing(t5),
+                        "score": np.nan,                      # bukan lexicon score
+                        "Sentimen": pred,                     # label dari prediksi model
+                        "source": "user_test",
+                        "confidence": float(conf) if conf is not None else np.nan,
+                        "created_at": pd.Timestamp.now(),
+                    }
+                    st.session_state.final_df = pd.concat(
+                        [st.session_state.final_df, pd.DataFrame([new_row])],
+                        ignore_index=True
+                    )
+                    st.success("✅ Ulasan berhasil ditambahkan ke dataset (final_df).")
+
+                    st.download_button(
+                        "📥 Download dataset terbaru (CSV)",
+                        data=st.session_state.final_df.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="dataset_final_plus_user_input.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
     card_close()
 
     # ======================
-    # Download Hasil
+    # Download hasil klasifikasi (test set)
     # ======================
     st.markdown("")
     card_open()
     st.markdown("## 📦 Download Hasil Klasifikasi SVM")
-    
-    # dataset hasil klasifikasi (khusus data uji / test set)
+
     df_svm_dl = eval_df.copy()
-    
-    # optional: tambahkan ringkasan model (akurasi) sebagai kolom konstan kalau mau
-    df_svm_dl["Akurasi_Model"] = round(acc, 6)
-    
+    df_svm_dl["Akurasi_Model"] = round(float(acc), 6)
+
     download_block(
-        title="Berisi data uji (test set): content, label asli, prediksi model, dan skor keyakinan (jika tersedia).",
+        title="Berisi data uji (test set): content, label asli, prediksi model.",
         df=df_svm_dl,
         filename="hasil_klasifikasi_svm_testset.csv"
     )
-    
     card_close()
