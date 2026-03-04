@@ -1064,7 +1064,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # AWAM-FRIENDLY: Kesimpulan Sederhana
     # ======================
     total_uji = int(len(y_test))
-    benar = int((pd.Series(y_pred) == pd.Series(y_test)).sum())
+    benar = int((np.asarray(y_pred) == np.asarray(y_test)).sum())
     salah = int(total_uji - benar)
 
     fp = int(cm[0, 1])  # negatif -> positif
