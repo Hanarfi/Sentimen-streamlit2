@@ -1014,20 +1014,6 @@ elif st.session_state.menu == "Klasifikasi SVM":
     st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
     card_close()
         
-        # label error dominan (pakai cm yang sudah kamu buat)
-        labels = ["negatif", "positif"]
-        cm = confusion_matrix(y_test, y_pred, labels=labels)
-        fp = int(cm[0, 1])  # negatif dikira positif
-        fn = int(cm[1, 0])  # positif dikira negatif
-        
-        if fp > fn:
-            st.info(f"Kesalahan yang paling sering terjadi: **Negatif dikira Positif** ({fp} kasus).")
-        elif fn > fp:
-            st.info(f"Kesalahan yang paling sering terjadi: **Positif dikira Negatif** ({fn} kasus).")
-        else:
-            st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
-        
-        card_close()
   
     
 
