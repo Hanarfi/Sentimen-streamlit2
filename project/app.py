@@ -1265,60 +1265,46 @@ elif st.session_state.menu == "Klasifikasi SVM":
         st.dataframe(rep_df, use_container_width=True)
         card_close()
 
-    def render_top_terms_from_model():
+    def render_word_frequency(eval_df):
         card_open()
-        st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
-
-        try:
-            feature_names = st.session_state.svm_feature_names
-            coef = st.session_state.svm_coef
-            classes = st.session_state.svm_classes
-            if feature_names is None or coef is None or classes is None:
-                raise ValueError("Feature names/coef/classes belum tersedia.")
-
-            # umumnya classes: ['negatif','positif']
-            pos_idx = np.argsort(coef)[-20:][::-1]
-            neg_idx = np.argsort(coef)[:20]
-
-            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
-            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("#### 🟢 Top Kata Positif")
-                st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
-                st.dataframe(top_pos, use_container_width=True)
-
-            with c2:
-                st.markdown("#### 🔴 Top Kata Negatif")
-                st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
-                st.dataframe(top_neg, use_container_width=True)
-
-            st.markdown("---")
-            st.caption("Download top kata (positif & negatif)")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.download_button(
-                    "📥 Download Top Kata Positif (CSV)",
-                    data=top_pos.to_csv(index=False).encode("utf-8-sig"),
-                    file_name="top_kata_positif_svm.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            with col_b:
-                st.download_button(
-                    "📥 Download Top Kata Negatif (CSV)",
-                    data=top_neg.to_csv(index=False).encode("utf-8-sig"),
-                    file_name="top_kata_negatif_svm.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-
-        except Exception as e:
-            st.error(f"Gagal membuat top kata: {e}")
-
+        st.markdown("### 🔤 Frekuensi Kata Positif & Negatif")
+    
+        from collections import Counter
+    
+        def get_word_freq(text_series, n=20):
+            words = []
+    
+            for text in text_series.astype(str):
+                tokens = text.split()
+                words.extend(tokens)
+    
+            counter = Counter(words)
+            return pd.DataFrame(counter.most_common(n), columns=["Kata", "Frekuensi"])
+    
+        pos_text = eval_df[eval_df["Prediksi Model"] == "positif"]["content"]
+        neg_text = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
+    
+        pos_freq = get_word_freq(pos_text)
+        neg_freq = get_word_freq(neg_text)
+    
+        col1, col2 = st.columns(2)
+    
+        with col1:
+            st.markdown("#### 🟢 Kata yang sering muncul pada ulasan **Positif**")
+            st.dataframe(pos_freq, use_container_width=True)
+    
+        with col2:
+            st.markdown("#### 🔴 Kata yang sering muncul pada ulasan **Negatif**")
+            st.dataframe(neg_freq, use_container_width=True)
+    
+        st.caption(
+            """
+    Frekuensi kata menunjukkan kata yang paling sering muncul pada ulasan positif dan negatif.
+    Hal ini membantu memahami faktor yang membuat pengguna memberikan ulasan baik atau keluhan.
+    """
+        )
+    
         card_close()
-
     def render_wrong_predictions(eval_df):
         card_open()
         st.markdown("### ❗ Contoh Ulasan yang Salah Prediksi")
@@ -1526,7 +1512,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
 
     render_confusion_matrix(cm, labels)
     render_classification_report(y_test, y_pred)
-    render_top_terms_from_model()
+    render_word_frequency(eval_df)
 
     render_wrong_predictions(eval_df)
     render_most_confident(model, X_test_vec, eval_df)
