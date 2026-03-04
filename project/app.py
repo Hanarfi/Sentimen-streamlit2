@@ -1057,7 +1057,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
         fn = int(cm[1, 0])  # positif -> negatif
 
         card_open()
-        st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
+        st.markdown("### ✅ Kesimpulan Sederhana")
         st.markdown(
             f"""
 **Ringkasan:**
