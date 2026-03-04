@@ -1126,6 +1126,34 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
+    # Contoh Ulasan Positif dan Negatif
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🧾 Contoh Ulasan Positif & Negatif (Hasil Prediksi Model)")
+    
+    eval_df = pd.DataFrame({
+        "content": X_test.values,
+        "Label Asli": y_test.values,
+        "Prediksi Model": y_pred
+    })
+    
+    pos_examples = eval_df[eval_df["Prediksi Model"] == "positif"]["content"].head(6)
+    neg_examples = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"].head(6)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### 🟢 Contoh yang diprediksi **POSITIF**")
+        st.dataframe(pos_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+    
+    with c2:
+        st.markdown("#### 🔴 Contoh yang diprediksi **NEGATIF**")
+        st.dataframe(neg_examples.reset_index(drop=True).to_frame("Ulasan"), use_container_width=True)
+    
+    st.caption("Contoh ini membantu user awam memahami seperti apa ulasan yang dianggap positif/negatif oleh model.")
+    card_close()
+
+    # ======================
     # TOP KATA POSITIF/NEGATIF (berdasarkan bobot LinearSVC)
     # ======================
     st.markdown("")
@@ -1243,6 +1271,59 @@ elif st.session_state.menu == "Klasifikasi SVM":
     except Exception:
         st.info("Model tidak menyediakan skor keyakinan untuk ditampilkan pada konfigurasi ini.")
 
+    card_close()
+
+    # ======================
+    # Insight Otomatis
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 💡 Insight Otomatis (Ringkasan Cepat)")
+    
+    # fungsi bantu ambil kata dominan dari teks
+    def top_terms(texts: pd.Series, n=10):
+        from collections import Counter
+        words = []
+        for t in texts.astype(str).fillna("").tolist():
+            # pakai preprocessing yang sama agar konsisten
+            t = stemming(stopword_removal(data_cleansing(case_folding(t))))
+            words.extend([w for w in t.split() if len(w) >= 3])
+        c = Counter(words)
+        return pd.DataFrame(c.most_common(n), columns=["Kata", "Frekuensi"])
+    
+    # 1) dominan pada prediksi negatif
+    neg_texts = eval_df[eval_df["Prediksi Model"] == "negatif"]["content"]
+    top_neg = top_terms(neg_texts, n=10)
+    
+    # 2) dominan pada yang salah prediksi (area sulit)
+    wrong_df = eval_df[eval_df["Label Asli"] != eval_df["Prediksi Model"]]
+    top_wrong = top_terms(wrong_df["content"], n=10) if not wrong_df.empty else pd.DataFrame(columns=["Kata","Frekuensi"])
+    
+    # narasi singkat
+    p_pos = (pd.Series(y_pred).value_counts().get("positif", 0) / len(y_pred)) * 100
+    p_neg = (pd.Series(y_pred).value_counts().get("negatif", 0) / len(y_pred)) * 100
+    
+    st.markdown(
+        f"""
+    **Ringkasan cepat:**
+    - Prediksi model menunjukkan sekitar **{p_pos:.1f}%** ulasan cenderung **positif** dan **{p_neg:.1f}%** cenderung **negatif** pada data uji.
+    - Kata yang sering muncul pada prediksi **negatif** biasanya menggambarkan sumber keluhan.
+    """.strip()
+    )
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### Kata dominan pada prediksi **NEGATIF**")
+        st.dataframe(top_neg, use_container_width=True)
+    
+    with c2:
+        st.markdown("#### Kata dominan pada **salah prediksi** (area sulit)")
+        if wrong_df.empty:
+            st.success("Tidak ada salah prediksi di data uji.")
+        else:
+            st.dataframe(top_wrong, use_container_width=True)
+    
+    st.caption("Insight ini bersifat ringkas dan membantu orang awam memahami topik keluhan dan area yang sulit untuk model.")
     card_close()
 
     st.markdown("")
