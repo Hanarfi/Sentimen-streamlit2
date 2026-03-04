@@ -978,9 +978,9 @@ elif st.session_state.menu == "Klasifikasi SVM":
     st.markdown(
         f"""
     **Ringkasan:**
-    - Dari **{total_uji}** ulasan data uji, model memprediksi dengan benar **{benar}** ulasan.
+    - Dari **{total_uji}** ulasan data uji,  memprediksi dengan benar **{benar}** ulasan.
     - Ada **{salah}** ulasan yang masih salah prediksi.
-    - Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
+    - Akurasi : **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
     """.strip()
     )
 
@@ -989,7 +989,7 @@ elif st.session_state.menu == "Klasifikasi SVM":
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi Model)")
+    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi )")
     
     col1, col2 = st.columns(2)
     
@@ -1326,6 +1326,72 @@ elif st.session_state.menu == "Klasifikasi SVM":
     st.caption("Insight ini bersifat ringkas dan membantu orang awam memahami topik keluhan dan area yang sulit untuk model.")
     card_close()
 
+    # ======================
+    # Pengujian Model
+    # ======================
+
+    st.markdown("")
+    card_open()
+    st.markdown("### 🧪 Pengujian Model (Input Ulasan → Prediksi Sentimen)")
+    
+    user_text = st.text_area(
+        "Masukkan ulasan yang ingin diuji",
+        placeholder="Contoh: aplikasi sering error saat login, tolong diperbaiki...",
+        height=120
+    )
+    
+    do_predict = st.button("🔎 Prediksi Sentimen", use_container_width=True)
+    
+    if do_predict:
+        if not user_text.strip():
+            st.warning("Ulasan tidak boleh kosong.")
+        else:
+            model = st.session_state.get("svm_model", None)
+            tfidf = st.session_state.get("tfidf", None)
+    
+            if model is None or tfidf is None:
+                st.error("Model belum tersedia. Jalankan 'Mulai Klasifikasi SVM' dulu.")
+            else:
+                # preprocessing sama seperti training
+                t0 = to_text(user_text)
+                t1 = case_folding(t0)
+                t2 = data_cleansing(t1)
+    
+                # normalisasi (opsional) jika kamus tersedia
+                ASSETS_DIR = "assets"
+                KAMUS_PATH = os.path.join(ASSETS_DIR, "kamus.xlsx")
+                kamus = load_kamus_excel_safe(KAMUS_PATH) if os.path.exists(KAMUS_PATH) else {}
+                t3 = normalisasi_kamus(t2, kamus) if kamus else t2
+    
+                t4 = stopword_removal(t3)
+                t5 = stemming(t4)
+    
+                X_user_vec = tfidf.transform([t5])
+                pred = model.predict(X_user_vec)[0]
+    
+                # confidence sederhana
+                try:
+                    score = float(model.decision_function(X_user_vec)[0])
+                    conf = abs(score)
+                except Exception:
+                    conf = None
+    
+                if pred == "positif":
+                    st.success("✅ Prediksi model: **POSITIF**")
+                else:
+                    st.error("❌ Prediksi model: **NEGATIF**")
+    
+                st.markdown("#### 🔍 Detail")
+                st.write("**Teks asli:**", t0)
+                st.write("**Setelah preprocessing:**", t5)
+                if conf is not None:
+                    st.caption(f"Skor keyakinan (semakin besar semakin yakin): {conf:.3f}")
+    
+    card_close()
+
+    # ======================
+    # Download Hasil
+    # ======================
     st.markdown("")
     card_open()
     st.markdown("## 📦 Download Hasil Klasifikasi SVM")
