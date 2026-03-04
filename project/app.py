@@ -964,10 +964,12 @@ elif st.session_state.menu == "Klasifikasi SVM":
     labels = ["negatif", "positif"]  # urutan tetap agar CM konsisten
     cm = confusion_matrix(y_test, y_pred, labels=labels)
 
-
+    # ======================
+    # Ringkasan Hasil
+    # ======================
     st.markdown("")
     card_open()
-    st.markdown("### ✅ Kesimpulan Sederhana (Mudah Dipahami)")
+    st.markdown("### ✅ Ringkasan Hasil")
     
     total_uji = len(y_test)
     benar = int((y_pred == y_test).sum())
@@ -981,21 +983,51 @@ elif st.session_state.menu == "Klasifikasi SVM":
     - Akurasi model: **{acc*100:.2f}%** (≈ {acc*100:.0f} dari 100 ulasan benar).
     """.strip()
     )
+
+    # ======================
+    # Pie Chart
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🥧 Pie Chart Sentimen (Label Asli vs Prediksi Model)")
     
-    # label error dominan (pakai cm yang sudah kamu buat)
-    labels = ["negatif", "positif"]
-    cm = confusion_matrix(y_test, y_pred, labels=labels)
-    fp = int(cm[0, 1])  # negatif dikira positif
-    fn = int(cm[1, 0])  # positif dikira negatif
+    col1, col2 = st.columns(2)
     
-    if fp > fn:
-        st.info(f"Kesalahan yang paling sering terjadi: **Negatif dikira Positif** ({fp} kasus).")
-    elif fn > fp:
-        st.info(f"Kesalahan yang paling sering terjadi: **Positif dikira Negatif** ({fn} kasus).")
-    else:
-        st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
+    # label asli (y_test)
+    with col1:
+        st.markdown("#### Label Asli (Data Uji)")
+        y_test_counts = pd.Series(y_test).value_counts()
+        fig, ax = plt.subplots(figsize=(4.8, 4.2))
+        ax.pie(y_test_counts.values, labels=y_test_counts.index, autopct="%1.1f%%", startangle=90)
+        ax.set_title("Distribusi Label Asli")
+        st.pyplot(fig)
     
+    # prediksi model (y_pred)
+    with col2:
+        st.markdown("#### Prediksi Model")
+        y_pred_counts = pd.Series(y_pred).value_counts()
+        fig, ax = plt.subplots(figsize=(4.8, 4.2))
+        ax.pie(y_pred_counts.values, labels=y_pred_counts.index, autopct="%1.1f%%", startangle=90)
+        ax.set_title("Distribusi Prediksi Model")
+        st.pyplot(fig)
+    
+    st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
     card_close()
+        
+        # label error dominan (pakai cm yang sudah kamu buat)
+        labels = ["negatif", "positif"]
+        cm = confusion_matrix(y_test, y_pred, labels=labels)
+        fp = int(cm[0, 1])  # negatif dikira positif
+        fn = int(cm[1, 0])  # positif dikira negatif
+        
+        if fp > fn:
+            st.info(f"Kesalahan yang paling sering terjadi: **Negatif dikira Positif** ({fp} kasus).")
+        elif fn > fp:
+            st.info(f"Kesalahan yang paling sering terjadi: **Positif dikira Negatif** ({fn} kasus).")
+        else:
+            st.info("Kesalahan Negatif→Positif dan Positif→Negatif jumlahnya relatif seimbang.")
+        
+        card_close()
   
     # ======================
     # NARASI AWAM
@@ -1016,19 +1048,6 @@ elif st.session_state.menu == "Klasifikasi SVM":
     else:
         kesimpulan2 = f"Kesalahan negatif→positif dan positif→negatif jumlahnya mirip."
 
-    # ======================
-    # TAMPILKAN RINGKASAN
-    # ======================
-    st.markdown("")
-    card_open()
-    st.markdown("### ✅ Ringkasan Hasil")
-    st.markdown(kesimpulan)
-    st.markdown(kesimpulan2)
-    st.markdown(
-        "- **Benar** artinya prediksi sama dengan label asli.\n"
-        "- **Salah** artinya prediksi berbeda dari label asli."
-    )
-    card_close()
 
     # ======================
     # CONFUSION MATRIX (plot umum + ringkasan)
