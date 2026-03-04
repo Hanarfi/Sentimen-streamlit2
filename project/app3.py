@@ -994,63 +994,90 @@ elif st.session_state.menu == "Klasifikasi SVM":
     card_close()
 
     # ======================
-    # CONFUSION MATRIX versi awam: 4 kartu
+    # CONFUSION MATRIX (plot umum + ringkasan)
     # ======================
     st.markdown("")
     card_open()
-    st.markdown("### 🔎 Confusion Matrix")
-
-    a, b, c, d = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
-    # a: negatif->negatif, b: negatif->positif, c: positif->negatif, d: positif->positif
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown(
-            f"""
-<div class="metric-card">
-  <p class="metric-title">✅ Negatif terdeteksi benar</p>
-  <p class="metric-value">{a}</p>
-  <p class="metric-sub">Ulasan negatif, diprediksi negatif (benar)</p>
-</div>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            f"""
-<div class="metric-card" style="margin-top:12px;">
-  <p class="metric-title">❌ Negatif salah jadi positif</p>
-  <p class="metric-value">{b}</p>
-  <p class="metric-sub">Ulasan negatif, diprediksi positif (salah)</p>
-</div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with c2:
-        st.markdown(
-            f"""
-<div class="metric-card">
-  <p class="metric-title">❌ Positif salah jadi negatif</p>
-  <p class="metric-value">{c}</p>
-  <p class="metric-sub">Ulasan positif, diprediksi negatif (salah)</p>
-</div>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            f"""
-<div class="metric-card" style="margin-top:12px;">
-  <p class="metric-title">✅ Positif terdeteksi benar</p>
-  <p class="metric-value">{d}</p>
-  <p class="metric-sub">Ulasan positif, diprediksi positif (benar)</p>
-</div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.markdown("---")
-    st.caption("Catatan: 4 kartu di atas adalah bentuk yang sama dengan confusion matrix, hanya dibuat lebih mudah dibaca.")
+    st.markdown("### 🔎 Confusion Matrix (Plot + Ringkasan)")
+    
+    labels = ["negatif", "positif"]  # pastikan konsisten
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+    
+    # ---- Plot CM (matplotlib) ----
+    fig, ax = plt.subplots(figsize=(5.2, 4.2))
+    im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
+    ax.figure.colorbar(im, ax=ax)
+    
+    ax.set(
+        xticks=np.arange(len(labels)),
+        yticks=np.arange(len(labels)),
+        xticklabels=labels,
+        yticklabels=labels,
+        xlabel="Prediksi Model",
+        ylabel="Label Asli",
+        title="Confusion Matrix"
+    )
+    
+    # tampilkan angka di tiap kotak
+    thresh = cm.max() / 2.0 if cm.max() > 0 else 0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(
+                j, i, format(cm[i, j], "d"),
+                ha="center", va="center",
+                color="white" if cm[i, j] > thresh else "black",
+                fontweight="bold"
+            )
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # ---- Tabel CM (opsional tapi membantu) ----
+    cm_df = pd.DataFrame(cm, index=[f"Asli {l}" for l in labels], columns=[f"Pred {l}" for l in labels])
+    st.dataframe(cm_df, use_container_width=True)
+    
+    # ---- Ringkasan CM (narasi) ----
+    total = int(cm.sum())
+    benar = int(np.trace(cm))
+    salah = int(total - benar)
+    acc_cm = (benar / total) if total else 0.0
+    
+    # untuk binary dengan urutan labels = ["negatif","positif"]
+    tn, fp = int(cm[0, 0]), int(cm[0, 1])  # negatif benar, negatif salah jadi positif
+    fn, tp = int(cm[1, 0]), int(cm[1, 1])  # positif salah jadi negatif, positif benar
+    
+    st.markdown("#### ✅ Ringkasan Confusion Matrix")
+    st.markdown(
+        f"""
+    - Total data uji: **{total}**
+    - Prediksi benar: **{benar}**
+    - Prediksi salah: **{salah}**
+    - Akurasi (dari CM): **{acc_cm*100:.2f}%**
+    """.strip()
+    )
+    
+    # jelaskan salah prediksi yang dominan
+    if fp > fn:
+        st.info(f"Kesalahan paling sering: **ulasan negatif dikira positif** (**{fp}** kasus).")
+    elif fn > fp:
+        st.info(f"Kesalahan paling sering: **ulasan positif dikira negatif** (**{fn}** kasus).")
+    else:
+        st.info("Kesalahan negatif→positif dan positif→negatif jumlahnya **seimbang**.")
+    
+    # ringkasan 4 komponen (lebih 'umum' juga)
+    st.markdown(
+        f"""
+    **Detail:**
+    - **TN (Negatif → Negatif)**: {tn}
+    - **FP (Negatif → Positif)**: {fp}
+    - **FN (Positif → Negatif)**: {fn}
+    - **TP (Positif → Positif)**: {tp}
+    """.strip()
+    )
+    
+    st.caption("Catatan: Baris = label asli, kolom = prediksi model.")
     card_close()
+
 
     # ======================
     # PENJELASAN METRIK (awam-friendly)
@@ -1073,6 +1100,83 @@ elif st.session_state.menu == "Klasifikasi SVM":
     rep_df = pd.DataFrame(rep).transpose()
     st.dataframe(rep_df, use_container_width=True)
     card_close()
+
+    # ======================
+    # TOP KATA POSITIF/NEGATIF (berdasarkan bobot LinearSVC)
+    # ======================
+    st.markdown("")
+    card_open()
+    st.markdown("### 🏷️ Top Kata Positif & Negatif (dari model)")
+    
+    try:
+        feature_names = tfidf.get_feature_names_out()
+    
+        # LinearSVC binary: coef_.shape = (1, n_features)
+        # Tanda koefisien menunjukkan arah ke kelas tertentu.
+        # Kita cek kelas mana yang dianggap "positif" oleh model.
+        # classes_ berurutan alfabet: biasanya ['negatif','positif']
+        coef = model.coef_.ravel()
+    
+        # Jika kelas ke-1 adalah 'positif', koef positif = condong ke 'positif'
+        # Kalau tidak, balik interpretasinya.
+        # (Umumnya aman karena classes_ biasanya ['negatif','positif'])
+        classes = list(model.classes_)
+        if len(classes) == 2 and classes[1] == "positif":
+            pos_idx = np.argsort(coef)[-20:][::-1]   # top 20 bobot terbesar
+            neg_idx = np.argsort(coef)[:20]          # top 20 bobot terkecil
+            top_pos = pd.DataFrame({
+                "Kata/Ngram": feature_names[pos_idx],
+                "Bobot": coef[pos_idx]
+            })
+            top_neg = pd.DataFrame({
+                "Kata/Ngram": feature_names[neg_idx],
+                "Bobot": coef[neg_idx]
+            })
+        else:
+            # fallback kalau urutan kelas berbeda
+            # anggap bobot positif condong ke classes[1] (apa pun isinya)
+            pos_idx = np.argsort(coef)[-20:][::-1]
+            neg_idx = np.argsort(coef)[:20]
+            top_pos = pd.DataFrame({"Kata/Ngram": feature_names[pos_idx], "Bobot": coef[pos_idx]})
+            top_neg = pd.DataFrame({"Kata/Ngram": feature_names[neg_idx], "Bobot": coef[neg_idx]})
+    
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### 🟢 Top Kata Positif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **positif**.")
+            st.dataframe(top_pos, use_container_width=True)
+    
+        with c2:
+            st.markdown("#### 🔴 Top Kata Negatif")
+            st.caption("Kata/ngram dengan bobot paling mendorong prediksi **negatif**.")
+            st.dataframe(top_neg, use_container_width=True)
+    
+        # Optional download
+        st.markdown("---")
+        st.caption("Download top kata (positif & negatif)")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.download_button(
+                "📥 Download Top Kata Positif (CSV)",
+                data=top_pos.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_positif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        with col_b:
+            st.download_button(
+                "📥 Download Top Kata Negatif (CSV)",
+                data=top_neg.to_csv(index=False).encode("utf-8-sig"),
+                file_name="top_kata_negatif_svm.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    except Exception as e:
+        st.error(f"Gagal membuat top kata: {e}")
+    
+    card_close()
+
 
     # ======================
     # CONTOH SALAH PREDIKSI (paling penting untuk awam)
