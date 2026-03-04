@@ -1097,7 +1097,19 @@ elif st.session_state.menu == "Klasifikasi SVM":
             ax.set_title("Distribusi Prediksi Model")
             st.pyplot(fig)
 
-        st.caption("Pie chart membantu melihat dominasi sentimen secara cepat, tanpa membaca tabel metrik.")
+        st.caption(
+          """
+          Perbedaan antara **Label Asli** dan **Prediksi Model** dapat terjadi karena model tidak selalu
+          memprediksi dengan sempurna. Model belajar dari pola kata pada data training,
+          sehingga beberapa ulasan bisa salah diklasifikasikan.
+          
+          Misalnya:
+          - ulasan negatif diprediksi sebagai positif
+          - ulasan positif diprediksi sebagai negatif
+          
+          Kesalahan ini menyebabkan distribusi pada pie chart prediksi bisa berbeda dari label asli.
+          """
+          )
         card_close()
 
     def top_terms_from_texts(texts: pd.Series, n=10):
